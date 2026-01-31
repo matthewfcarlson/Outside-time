@@ -1,0 +1,5 @@
+# Cloudflare Workers
+
+Backend API using Cloudflare Workers, D1 (database), and KV (cache).
+
+See ../PLANNING.md for detailed architecture.
