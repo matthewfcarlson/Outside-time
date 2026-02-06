@@ -5,4 +5,4 @@ compatibility_date = "2024-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "outside-time-db"
-database_id = "TODO-replace-with-actual-id"
+database_id = "97acbf05-6366-400a-ad79-19559961c1fc"
