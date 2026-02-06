@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the technical architecture, data models, and implementation plan for Outside Time Tracker - an application to help users track and visualize their outdoor time throughout the year.
+Outside Time Tracker is a privacy-first application to help users track and visualize their outdoor time. The core design principle is **zero-knowledge encryption**: the server is a dumb blob store that never sees plaintext user data. All data is encrypted client-side using public-key cryptography and stored as an append-only event log.
 
 ---
 
@@ -23,9 +23,107 @@ This document outlines the technical architecture, data models, and implementati
 
 **Retroactive Adjustments**:
 - Users can add past outdoor sessions manually
-- Users can edit existing sessions (adjust start/end time)
-- Users can delete incorrect entries
-- All adjustments maintain the 10-minute chunk granularity
+- All adjustments are new append events (corrections, not mutations)
+- 10-minute chunk granularity is maintained
+
+### Append-Only Event Log
+
+All user actions produce **encrypted events** that are appended to a per-user log. The server never sees plaintext. Events are immutable — corrections are new events that supersede previous ones.
+
+**Event Types**:
+- `timer_start` — User started going outside
+- `timer_stop` — User came back inside
+- `manual_entry` — Retroactive session entry (contains start + end)
+- `correction` — Amends a prior event (references event ID)
+- `goal_set` — User set a new goal (v2)
+- `settings_update` — User preferences changed (v2)
+
+**Event Envelope** (plaintext JSON before encryption, ~50-100 bytes):
+```json
+{
+  "id": "uuid-v4",
+  "type": "timer_stop",
+  "ts": 1706745600,
+  "data": {
+    "started_at": 1706742000,
+    "duration_minutes": 30
+  }
+}
+```
+
+The client encrypts this envelope into a sealed box and appends it to the server.
+
+---
+
+## Cryptographic Architecture
+
+### Key Primitives
+
+All cryptography uses **libsodium** (NaCl) primitives:
+
+| Operation | Primitive | Details |
+|-----------|-----------|---------|
+| Keypair generation | `crypto_box_keypair` | X25519 key pair |
+| Encrypt event | `crypto_box_seal` | Sealed box (anonymous sender) |
+| Decrypt event | `crypto_box_seal_open` | Requires private key |
+| Sign writes | `crypto_sign` | Ed25519 signature |
+| Verify writes | `crypto_sign_verify` | Server verifies before appending |
+
+### Why Sealed Boxes?
+
+`crypto_box_seal` (X25519 + XSalsa20-Poly1305) is ideal because:
+- **48 bytes overhead** per event (ephemeral public key + MAC)
+- 50 bytes of JSON → ~98 bytes ciphertext — very compact
+- No sender authentication needed at the crypto layer (we use signatures separately for write auth)
+- Widely supported via `tweetnacl-js` / `libsodium.js` in browsers and native libsodium on iOS
+
+### Identity Model
+
+- **No accounts, no emails, no passwords, no OAuth**
+- Identity = a keypair generated on the client at first launch
+- The **public key** is the user's address on the server
+- The **private key** never leaves the client device
+- Users should be offered a **recovery mechanism** (e.g., export private key as base64, or BIP39-style mnemonic) for backup
+
+### Write Authorization
+
+To prevent unauthorized appends, all writes must be **signed**:
+
+1. Client creates the encrypted event blob
+2. Client signs `(public_key || sequence_number || blob)` with their Ed25519 signing key
+3. Server verifies the signature against the claimed public key before accepting the append
+4. This ensures only the keypair owner can write to their log
+
+**Key detail**: We derive both an encryption keypair (X25519) and a signing keypair (Ed25519) from a single seed. libsodium supports this via `crypto_sign_seed_keypair` + `crypto_sign_ed25519_pk_to_curve25519` for converting between the two.
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────┐
+│ CLIENT (Browser / iOS)                          │
+│                                                 │
+│  1. Generate event JSON                         │
+│  2. Encrypt with crypto_box_seal(event, pubkey) │
+│  3. Sign (pubkey || seq || ciphertext)          │
+│  4. POST to server                              │
+│                                                 │
+│  On read:                                       │
+│  1. GET log entries from server                 │
+│  2. Decrypt each with crypto_box_seal_open()    │
+│  3. Reconstruct state client-side               │
+└─────────────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────┐
+│ SERVER (Cloudflare Worker + D1)                 │
+│                                                 │
+│  - Stores opaque encrypted blobs                │
+│  - Indexes by public key + sequence number      │
+│  - Verifies Ed25519 signature on writes         │
+│  - Never sees plaintext                         │
+│  - No concept of "users" beyond public keys     │
+└─────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -34,236 +132,138 @@ This document outlines the technical architecture, data models, and implementati
 ### Cloudflare D1 Schema
 
 ```sql
--- Users table
-CREATE TABLE users (
-  id TEXT PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
-  display_name TEXT,
-  avatar_url TEXT,
-  timezone TEXT DEFAULT 'UTC',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+-- Encrypted event log
+-- Each row is an opaque encrypted blob belonging to a public key
+CREATE TABLE events (
+  public_key TEXT NOT NULL,          -- Hex-encoded Ed25519 public key (user identity)
+  seq INTEGER NOT NULL,              -- Monotonically increasing sequence number per key
+  ciphertext BLOB NOT NULL,          -- Sealed box encrypted event (~100 bytes)
+  created_at INTEGER NOT NULL,       -- Unix timestamp (server-assigned, for sync)
+  PRIMARY KEY (public_key, seq)
 );
 
--- Outdoor sessions table
-CREATE TABLE sessions (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  started_at INTEGER NOT NULL,        -- Unix timestamp
-  ended_at INTEGER,                    -- NULL if session is active
-  duration_minutes INTEGER,            -- Calculated, rounded to 10-min chunks
-  notes TEXT,                          -- Optional notes about the session
-  location_name TEXT,                  -- Optional: "Park", "Backyard", etc.
-  is_manual_entry INTEGER DEFAULT 0,  -- Flag for retroactive entries
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
--- Goals table
-CREATE TABLE goals (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  goal_type TEXT NOT NULL,            -- 'daily', 'weekly', 'monthly', 'yearly'
-  target_minutes INTEGER NOT NULL,    -- Target in minutes (multiples of 10)
-  is_active INTEGER DEFAULT 1,
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
--- Indexes for performance
-CREATE INDEX idx_sessions_user_date ON sessions(user_id, started_at);
-CREATE INDEX idx_sessions_active ON sessions(user_id, ended_at) WHERE ended_at IS NULL;
+-- Index for efficient sync (fetch events after a given sequence)
+CREATE INDEX idx_events_sync ON events(public_key, seq);
 ```
 
-### Cloudflare KV Usage
+That's it. One table. The server knows nothing about what's inside the blobs.
 
-| Key Pattern | Value | Purpose |
-|-------------|-------|---------|
-| `session:active:{user_id}` | Session ID | Track active timer session |
-| `auth:token:{token}` | User ID + expiry | JWT validation cache |
-| `stats:daily:{user_id}:{date}` | Minutes JSON | Cached daily totals |
-| `share:{share_id}` | Share data JSON | Temporary share links |
+### Why D1 (Not R2)?
+
+- D1 gives us **row-level access** — clients can request "give me events after seq N" for efficient sync
+- Event blobs are tiny (~100 bytes), well within D1 row size limits
+- Simpler than managing R2 objects for append-only small records
+- Can revisit R2 if log sizes grow past D1 limits (10GB per database)
 
 ---
 
 ## API Design
 
-### Authentication
+### Endpoints
+
+The API is minimal — the server is a dumb log store.
 
 ```
-POST /api/auth/register
-POST /api/auth/login
-POST /api/auth/logout
-POST /api/auth/refresh
-GET  /api/auth/me
-```
+# Append an encrypted event to a user's log
+POST /api/log/:publicKey
+Headers:
+  Content-Type: application/octet-stream
+  X-Signature: <base64 Ed25519 signature over (publicKey || seq || body)>
+  X-Sequence: <next sequence number>
+Body: <raw ciphertext bytes>
 
-### Sessions
+Response: 201 Created
+  { "seq": 42, "created_at": 1706745600 }
 
-```
-# Get sessions (with date range filtering)
-GET /api/sessions?start_date=2024-01-01&end_date=2024-12-31
+Errors:
+  400 — Invalid signature, sequence gap, or malformed request
+  409 — Sequence number conflict (already exists)
 
-# Start a new outdoor session (timer starts)
-POST /api/sessions/start
-Response: { id, started_at, status: "active" }
 
-# End current outdoor session (timer stops)
-POST /api/sessions/end
-Response: { id, started_at, ended_at, duration_minutes }
-
-# Get current active session (if any)
-GET /api/sessions/active
-Response: { id, started_at, elapsed_minutes } or null
-
-# Add a manual/retroactive session
-POST /api/sessions
-Body: { started_at, ended_at, notes?, location_name? }
-
-# Update a session (retroactive adjustment)
-PUT /api/sessions/:id
-Body: { started_at?, ended_at?, notes?, location_name? }
-
-# Delete a session
-DELETE /api/sessions/:id
-```
-
-### Statistics
-
-```
-# Get aggregated stats
-GET /api/stats?period=day|week|month|year&date=2024-06-15
-
-Response: {
-  period: "day",
-  date: "2024-06-15",
-  total_minutes: 120,
-  total_chunks: 12,          # 10-min chunks
-  session_count: 3,
-  streak_days: 14,
-  comparison: {
-    previous_period: 90,
-    change_percent: 33.3
+# Download a user's event log (or a slice of it)
+GET /api/log/:publicKey?after=0&limit=1000
+Response: 200 OK
+  {
+    "events": [
+      { "seq": 1, "ciphertext": "<base64>", "created_at": 1706745600 },
+      { "seq": 2, "ciphertext": "<base64>", "created_at": 1706745660 },
+      ...
+    ],
+    "has_more": false
   }
-}
 
-# Get yearly heatmap data
-GET /api/stats/heatmap?year=2024
 
-Response: {
-  year: 2024,
-  data: [
-    { date: "2024-01-01", minutes: 60, chunks: 6 },
-    { date: "2024-01-02", minutes: 30, chunks: 3 },
-    ...
-  ]
-}
+# Get log metadata (no encrypted content)
+HEAD /api/log/:publicKey
+Response: 200 OK
+Headers:
+  X-Event-Count: 142
+  X-Latest-Seq: 142
 ```
 
-### Goals
+### No Other Endpoints Needed for MVP
 
-```
-GET    /api/goals
-POST   /api/goals      Body: { goal_type, target_minutes }
-PUT    /api/goals/:id  Body: { target_minutes?, is_active? }
-DELETE /api/goals/:id
-```
-
-### Sharing
-
-```
-# Generate a shareable image/link
-POST /api/share
-Body: { type: "stats_card" | "heatmap" | "achievement", period?, date? }
-Response: { share_url, image_url, expires_at }
-
-# Get shared content (public endpoint)
-GET /api/share/:share_id
-```
+- No auth endpoints (identity is a keypair)
+- No stats endpoints (computed client-side)
+- No goals endpoints (stored as encrypted events)
+- No sharing endpoints (v3 — deferred)
 
 ---
 
 ## Frontend Architecture
 
-### Web App (Next.js)
+### Web App (Next.js) — MVP Priority
 
 ```
 web-app/
 ├── src/
-│   ├── app/                    # Next.js App Router
+│   ├── app/                     # Next.js App Router
 │   │   ├── layout.tsx
-│   │   ├── page.tsx            # Landing/Dashboard
-│   │   ├── login/
-│   │   ├── register/
-│   │   ├── dashboard/
-│   │   ├── history/
-│   │   ├── goals/
-│   │   ├── settings/
-│   │   └── share/[id]/         # Public share pages
+│   │   ├── page.tsx             # Landing / Timer dashboard
+│   │   └── settings/
+│   │       └── page.tsx         # Key backup/restore
 │   ├── components/
-│   │   ├── ui/                 # Reusable UI components
-│   │   ├── Timer.tsx           # Main timer component
-│   │   ├── Heatmap.tsx         # Yearly heatmap visualization
-│   │   ├── StatsCard.tsx
-│   │   ├── SessionList.tsx
-│   │   └── GoalProgress.tsx
-│   ├── hooks/
-│   │   ├── useTimer.ts
-│   │   ├── useAuth.ts
-│   │   └── useSessions.ts
+│   │   ├── Timer.tsx            # Main timer component
+│   │   ├── TodayStats.tsx       # Today's outdoor time summary
+│   │   └── SessionList.tsx      # Recent sessions
 │   ├── lib/
-│   │   ├── api.ts              # API client
-│   │   └── utils.ts
+│   │   ├── crypto.ts            # Keypair gen, seal/unseal, sign/verify
+│   │   ├── events.ts            # Event creation, encoding, decoding
+│   │   ├── sync.ts              # Sync engine (push/pull events)
+│   │   ├── store.ts             # Local state from decrypted events
+│   │   └── api.ts               # HTTP client for worker API
+│   ├── hooks/
+│   │   ├── useTimer.ts          # Timer state management
+│   │   ├── useIdentity.ts       # Keypair management
+│   │   └── useSessions.ts       # Decrypted session state
 │   └── styles/
 ├── public/
 ├── next.config.js
 ├── tailwind.config.js
+├── tsconfig.json
 └── package.json
 ```
 
-### iOS App (SwiftUI)
+### iOS App (SwiftUI) — v3
 
 ```
 ios-app/
 ├── OutsideTime/
-│   ├── App/
-│   │   ├── OutsideTimeApp.swift
-│   │   └── AppDelegate.swift
+│   ├── Crypto/
+│   │   ├── KeyManager.swift     # Keychain storage, keypair ops
+│   │   └── SealedBox.swift      # libsodium wrappers
+│   ├── Sync/
+│   │   ├── EventLog.swift       # Local event log
+│   │   └── SyncEngine.swift     # Push/pull with server
 │   ├── Models/
-│   │   ├── User.swift
-│   │   ├── Session.swift
-│   │   └── Goal.swift
+│   │   └── Event.swift          # Event types and encoding
 │   ├── Views/
-│   │   ├── ContentView.swift
-│   │   ├── Dashboard/
-│   │   │   ├── DashboardView.swift
-│   │   │   ├── TimerView.swift
-│   │   │   └── QuickStatsView.swift
-│   │   ├── History/
-│   │   │   ├── HistoryView.swift
-│   │   │   ├── HeatmapView.swift
-│   │   │   └── SessionRowView.swift
-│   │   ├── Goals/
-│   │   │   └── GoalsView.swift
-│   │   ├── Settings/
-│   │   │   └── SettingsView.swift
-│   │   └── Shared/
-│   │       └── ShareCardView.swift
-│   ├── ViewModels/
-│   │   ├── TimerViewModel.swift
-│   │   ├── SessionsViewModel.swift
-│   │   └── StatsViewModel.swift
-│   ├── Services/
-│   │   ├── APIService.swift
-│   │   ├── AuthService.swift
-│   │   └── TimerService.swift
-│   ├── Widgets/
-│   │   └── OutsideTimeWidget/
-│   ├── Extensions/
-│   └── Resources/
-├── OutsideTime.xcodeproj
-└── OutsideTimeTests/
+│   │   ├── TimerView.swift
+│   │   ├── DashboardView.swift
+│   │   └── SettingsView.swift
+│   └── ViewModels/
+│       └── TimerViewModel.swift
+└── OutsideTime.xcodeproj
 ```
 
 ### Cloudflare Workers
@@ -271,27 +271,18 @@ ios-app/
 ```
 cloudflare-workers/
 ├── src/
-│   ├── index.ts                # Main entry point
-│   ├── router.ts               # Request routing
-│   ├── middleware/
-│   │   ├── auth.ts             # Authentication middleware
-│   │   ├── cors.ts
-│   │   └── rateLimit.ts
+│   ├── index.ts                 # Main entry, request routing
 │   ├── handlers/
-│   │   ├── auth.ts
-│   │   ├── sessions.ts
-│   │   ├── stats.ts
-│   │   ├── goals.ts
-│   │   └── share.ts
-│   ├── services/
-│   │   ├── database.ts         # D1 operations
-│   │   ├── cache.ts            # KV operations
-│   │   └── time.ts             # Time rounding logic
-│   ├── utils/
-│   │   └── response.ts
-│   └── types.ts
-├── schema.sql                  # D1 schema
-├── wrangler.toml               # Cloudflare config
+│   │   ├── append.ts            # POST /api/log/:publicKey
+│   │   ├── read.ts              # GET /api/log/:publicKey
+│   │   └── head.ts              # HEAD /api/log/:publicKey
+│   ├── middleware/
+│   │   ├── cors.ts              # CORS headers
+│   │   └── rateLimit.ts         # Rate limiting
+│   ├── crypto.ts                # Ed25519 signature verification
+│   └── types.ts                 # TypeScript type definitions
+├── schema.sql                   # D1 schema
+├── wrangler.toml
 ├── package.json
 └── tsconfig.json
 ```
@@ -300,176 +291,154 @@ cloudflare-workers/
 
 ## Time Calculation Logic
 
+All computation happens **client-side** after decrypting the event log.
+
 ### Rounding to 10-Minute Chunks
 
 ```typescript
 function roundToChunks(minutes: number): number {
-  // Round to nearest 10 minutes
-  // Minimum of 10 minutes if any time was recorded
   if (minutes <= 0) return 0;
-  if (minutes < 10) return 10; // Minimum 10 minutes
+  if (minutes < 10) return 10;
   return Math.round(minutes / 10) * 10;
 }
-
-function calculateDuration(startedAt: Date, endedAt: Date): number {
-  const diffMs = endedAt.getTime() - startedAt.getTime();
-  const diffMinutes = diffMs / (1000 * 60);
-  return roundToChunks(diffMinutes);
-}
 ```
 
-### Daily Aggregation
+### Reconstructing State from Events
 
 ```typescript
-function getDailyTotal(sessions: Session[]): number {
-  // Sum all session durations for the day
-  // Each session already rounded to 10-min chunks
-  return sessions.reduce((sum, s) => sum + s.duration_minutes, 0);
+function reconstructSessions(events: DecryptedEvent[]): Session[] {
+  const sessions: Session[] = [];
+  let activeTimer: { id: string; started_at: number } | null = null;
+
+  for (const event of events) {
+    switch (event.type) {
+      case 'timer_start':
+        activeTimer = { id: event.id, started_at: event.ts };
+        break;
+      case 'timer_stop':
+        if (activeTimer) {
+          const durationMin = (event.ts - activeTimer.started_at) / 60;
+          sessions.push({
+            id: activeTimer.id,
+            started_at: activeTimer.started_at,
+            ended_at: event.ts,
+            duration_minutes: roundToChunks(durationMin),
+          });
+          activeTimer = null;
+        }
+        break;
+      case 'manual_entry':
+        sessions.push({
+          id: event.id,
+          started_at: event.data.started_at,
+          ended_at: event.data.ended_at,
+          duration_minutes: roundToChunks(
+            (event.data.ended_at - event.data.started_at) / 60
+          ),
+        });
+        break;
+      case 'correction':
+        // Apply correction to referenced event
+        // (replace or remove the original session)
+        break;
+    }
+  }
+
+  return sessions;
 }
 ```
-
----
-
-## Sharing Mechanisms
-
-### Web App Sharing
-
-1. **Web Share API** (Progressive Enhancement)
-   ```typescript
-   if (navigator.share) {
-     await navigator.share({
-       title: 'My Outside Time',
-       text: 'I spent 5 hours outside this week!',
-       url: shareUrl
-     });
-   }
-   ```
-
-2. **Generated Image Cards**
-   - Server-side rendering of stats as PNG images
-   - Use `@cloudflare/pages-plugin-vercel-og` or similar
-   - Optimized for social media dimensions
-
-3. **Embeddable Widgets**
-   - `<iframe>` embed code for blogs/websites
-   - SVG badges (like GitHub readme badges)
-
-### iOS App Sharing
-
-1. **UIActivityViewController**
-   - Share text, images, and URLs
-   - Support for all iOS share targets
-
-2. **WidgetKit Integration**
-   - Small, Medium, Large widget sizes
-   - Show daily progress, streaks, timer status
-
-3. **App Intents / Shortcuts**
-   - "Start outdoor timer" Siri shortcut
-   - "How long was I outside today?" query
-
-4. **Live Activities** (iOS 16.1+)
-   - Show active timer on lock screen
-   - Dynamic Island support
-
----
-
-## Design Guidelines
-
-### Visual Style
-
-- **Color Palette**: Nature-inspired greens, sky blues, warm earth tones
-- **Typography**: Clean, readable sans-serif (SF Pro for iOS, Inter for web)
-- **Iconography**: Organic, rounded icons representing outdoor activities
-- **Animations**: Smooth, delightful micro-interactions
-
-### Heatmap Visualization
-
-Inspired by GitHub's contribution graph:
-- Calendar grid showing each day of the year
-- Color intensity represents time spent outside
-- Color scale: Light green (< 30 min) to Deep green (> 2 hours)
-- Tap/hover to see daily details
-
-### Timer Interface
-
-- Large, prominent start/stop button
-- Clear elapsed time display (updating live)
-- Quick-add buttons for common durations
-- Visual feedback for active state
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Foundation (MVP)
-- [ ] Cloudflare Workers setup with D1 and KV
-- [ ] Basic authentication (email/password)
-- [ ] Session CRUD operations
-- [ ] Timer start/stop functionality
-- [ ] Basic web app with timer and session list
-- [ ] Basic iOS app with timer and session list
+### v1: MVP — "Timer That Works"
+- [ ] Cloudflare Worker with D1 (append-only encrypted log store)
+- [ ] Ed25519 signature verification on writes
+- [ ] GET/POST/HEAD endpoints for log access
+- [ ] CORS and basic rate limiting
+- [ ] Web app: keypair generation and storage (localStorage)
+- [ ] Web app: crypto_box_seal encrypt/decrypt via tweetnacl
+- [ ] Web app: start/stop timer, append events to server
+- [ ] Web app: download & decrypt log, show today's outdoor time
+- [ ] Web app: manual session entry
+- [ ] Key export/import for backup
 
-### Phase 2: Visualization
-- [ ] Yearly heatmap component (web)
-- [ ] Yearly heatmap component (iOS)
-- [ ] Daily/weekly/monthly statistics
-- [ ] Streak tracking
+### v2: "Make It Useful"
+- [ ] Yearly heatmap / year-in-review visualization
+- [ ] Goal setting (stored as encrypted events)
+- [ ] Streak tracking (computed client-side)
+- [ ] Daily/weekly/monthly statistics views
 - [ ] Charts and graphs
+- [ ] Data export (JSON, CSV — decrypted client-side)
 
-### Phase 3: Goals & Gamification
-- [ ] Goal setting and tracking
-- [ ] Achievements/badges
-- [ ] Progress notifications
-
-### Phase 4: Sharing & Social
-- [ ] Share card generation
+### v3: "Make It Social + iOS"
+- [ ] iOS app (SwiftUI + native libsodium)
+- [ ] Sharing mechanism (owner decrypts and publishes summary)
 - [ ] Public profile pages
-- [ ] iOS widgets
-- [ ] Web Share API integration
+- [ ] iOS widgets (WidgetKit)
+- [ ] Live Activities for active timer
 
-### Phase 5: Polish & Launch
+### v4: "Polish & Launch"
 - [ ] Onboarding flow
-- [ ] Settings and preferences
-- [ ] Data export
 - [ ] App Store submission
 - [ ] Marketing website
+- [ ] Optional: weather integration, location, Apple Health
 
 ---
 
-## Security Considerations
+## Security Model
 
-- All API endpoints authenticated (except share viewing)
-- Rate limiting on all endpoints
-- Input validation and sanitization
-- HTTPS only
-- Secure token storage (HttpOnly cookies for web, Keychain for iOS)
-- CORS configured for allowed origins
+### What the Server Knows
+- A set of public keys that have stored data
+- How many events each public key has
+- When events were appended (server timestamps)
+- The size of each encrypted blob
+
+### What the Server Does NOT Know
+- What the events contain (timer starts, stops, durations)
+- Who the user is (no email, name, or identifying info)
+- Any plaintext user data whatsoever
+
+### Threat Model
+- **Server compromise**: Attacker gets encrypted blobs. Cannot decrypt without private keys.
+- **Network eavesdropping**: HTTPS protects in transit. Ciphertext is opaque even without TLS.
+- **Write spam**: Mitigated by signature verification (only keypair owner can append) + rate limiting.
+- **Public key enumeration**: Public keys are visible via the API. This is by design — the public key is an address, not a secret. No sensitive data is exposed.
+
+### Client-Side Security
+- Private key stored in browser localStorage (MVP) — acceptable tradeoff for MVP
+- iOS: Keychain storage (v3)
+- Users should export/backup their key — lost key = lost data (by design)
+- No server-side recovery possible (this is a feature, not a bug)
 
 ---
 
 ## Performance Targets
 
-- API response time: < 100ms (p95)
+- API response time: < 50ms (p95) — it's just D1 reads/writes
 - Web app LCP: < 2.5s
-- iOS app launch: < 1s
-- Timer accuracy: ± 1 second
+- Timer accuracy: ± 1 second (client-side, not dependent on server)
+- Sync latency: < 200ms for typical log sizes (< 1000 events/year)
+- Event decryption: < 1ms per event (tweetnacl is fast)
 
 ---
 
-## Open Questions
+## Open Questions (Future)
 
-1. Should we support multiple simultaneous timers (e.g., for different activities)?
-2. Weather integration - show weather during outdoor sessions?
-3. Location tracking - map of where user spent time outside?
-4. Apple Health / Google Fit integration?
-5. Offline support requirements for iOS app?
+1. **Multi-device sync**: How to handle sequence conflicts when the same keypair appends from two devices simultaneously? (Likely: server rejects conflicting seq, client retries with next seq)
+2. **Log compaction**: After years of use, logs could grow large. Could support a "compaction" event that summarizes prior state.
+3. **Shared viewing**: For social features, the owner could re-encrypt a subset of events with a shared key, or publish a signed plaintext summary.
+4. **Key rotation**: Allow users to rotate their keypair while maintaining history.
+5. **Multiple timers**: Track different outdoor activities (hiking, gardening, etc.) as optional event properties.
+6. **Weather/location**: Optional enrichment data as additional event properties.
 
 ---
 
 ## Resources
 
+- [libsodium documentation](https://doc.libsodium.org/)
+- [tweetnacl-js](https://github.com/nicehash/nicehash) — JS implementation of NaCl
 - [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
 - [Cloudflare D1 Docs](https://developers.cloudflare.com/d1/)
 - [Next.js Documentation](https://nextjs.org/docs)
-- [SwiftUI Documentation](https://developer.apple.com/documentation/swiftui/)

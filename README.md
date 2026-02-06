@@ -1,144 +1,100 @@
 # Outside Time Tracker
 
-A beautiful web and iOS app to track how much time you spend outdoors throughout the year. Visualize your outdoor habits, set goals, and share your progress with friends.
+A privacy-first app to track how much time you spend outdoors. Your data is encrypted on your device before it ever touches a server — we can't read it, even if we wanted to.
 
-## Vision
+## How It Works
 
-In our increasingly indoor-focused world, spending time outside is essential for mental and physical health. Outside Time Tracker helps you become more mindful of your outdoor time by providing:
+### Zero-Knowledge Architecture
 
-- **Easy Time Logging** - Quick one-tap tracking when you head outside
-- **Beautiful Visualizations** - See your outdoor time as stunning yearly heatmaps and charts
-- **Goal Setting** - Set daily, weekly, or monthly outdoor time goals
-- **Sharing** - Share your outdoor achievements with friends and family
-- **Cross-Platform Sync** - Seamlessly sync between web and iOS
+- **Your identity is a keypair** — no emails, no passwords, no accounts
+- **All data is encrypted client-side** using public-key cryptography (libsodium sealed boxes)
+- **The server is a dumb blob store** — it stores encrypted bytes and verifies signatures, nothing more
+- **Only you can decrypt your data** — your private key never leaves your device
+
+### Time Tracking
+
+All outdoor time is tracked in **10-minute increments**.
+
+1. **Start Timer** — Tap "Go Outside" when you head outdoors
+2. **Stop Timer** — Tap "I'm Back Inside" when you return
+3. **Multiple Sessions** — Go back out anytime, each session adds to your daily total
+4. **Manual Entry** — Forgot to track? Add past sessions anytime
+
+Example: 23 minutes → rounds to 20 min. 27 minutes → rounds to 30 min. Minimum recorded time is 10 minutes.
+
+### Under the Hood
+
+Every action (timer start, timer stop, manual entry) becomes an encrypted **event** appended to your personal log on the server. When you open the app, it downloads your log, decrypts it locally, and reconstructs your history. The server never sees plaintext.
 
 ## Project Structure
 
 ```
 outside-time/
-├── web-app/              # React/Next.js web application
-├── ios-app/              # Native Swift iOS application
-├── cloudflare-workers/   # Backend API and data storage
+├── web-app/              # React/Next.js web application (MVP)
+├── ios-app/              # Native Swift iOS application (v3)
+├── cloudflare-workers/   # Backend — encrypted log store
 ├── README.md             # This file
-└── PLANNING.md           # Detailed technical planning document
+└── PLANNING.md           # Technical architecture and design
 ```
 
 ## Tech Stack
 
-### Frontend - Web App
+### Backend
+- **Runtime**: Cloudflare Workers (serverless)
+- **Database**: Cloudflare D1 (SQLite) — stores encrypted event blobs
+- **Auth**: Ed25519 signature verification (no passwords, no OAuth)
+
+### Web App (MVP)
 - **Framework**: React with Next.js
 - **Styling**: Tailwind CSS
-- **Animations**: Framer Motion
-- **Charts**: D3.js or Recharts for visualizations
+- **Crypto**: tweetnacl-js (libsodium compatible)
 - **Deployment**: Cloudflare Pages
 
-### Frontend - iOS App
-- **Language**: Swift
-- **Framework**: SwiftUI
-- **Architecture**: MVVM
-- **Local Storage**: Core Data / SwiftData
-- **Distribution**: App Store
+### iOS App (v3)
+- **Language**: Swift / SwiftUI
+- **Crypto**: libsodium (native)
+- **Local Storage**: Keychain for keys
 
-### Backend
-- **Runtime**: Cloudflare Workers
-- **Database**: Cloudflare D1 (SQLite)
-- **Cache/Sessions**: Cloudflare KV
-- **Authentication**: JWT tokens with optional OAuth providers
-
-## How It Works
-
-### Time Tracking in 10-Minute Chunks
-All outdoor time is tracked in **10-minute increments**. This encourages meaningful outdoor time and provides cleaner visualizations.
-
-1. **Start Timer** - Tap "Go Outside" when you head outdoors
-2. **Stop Timer** - Tap "I'm Back Inside" when you return
-3. **Multiple Sessions** - Go back out anytime, each session adds to your daily total
-4. **Retroactive Adjustments** - Forgot to track? Add or edit past sessions anytime
-
-Example: If you're outside for 23 minutes, it rounds to 20 minutes. If you're out for 27 minutes, it rounds to 30 minutes. Minimum recorded time is 10 minutes.
-
-## Features
-
-### Core Features
-- [ ] User registration and authentication
-- [ ] Timer-based tracking (start/stop)
-- [ ] Multiple sessions per day (go back out, add more time)
-- [ ] Retroactive entry and adjustment of past sessions
-- [ ] Time rounded to 10-minute chunks
-- [ ] Daily, weekly, monthly, yearly statistics
-- [ ] Yearly heatmap visualization (similar to GitHub contribution graph)
-- [ ] Streak tracking
-- [ ] Goal setting and progress tracking
-
-### Social Features
-- [ ] Share statistics as beautiful images
-- [ ] Public profile pages
-- [ ] Leaderboards (opt-in)
-- [ ] Share via native share sheets (iOS) and Web Share API
-
-### Data & Privacy
-- [ ] Export data (JSON, CSV)
-- [ ] Data deletion
-- [ ] Privacy-first design (minimal data collection)
-
-## Getting Started
+## Development
 
 ### Prerequisites
 - Node.js 18+
 - pnpm or npm
-- Xcode 15+ (for iOS development)
-- Cloudflare account
+- Cloudflare account (for deployment)
 
-### Web App Development
-```bash
-cd web-app
-pnpm install
-pnpm dev
-```
-
-### iOS App Development
-```bash
-cd ios-app
-open OutsideTime.xcodeproj
-```
-
-### Cloudflare Workers Development
+### Cloudflare Workers
 ```bash
 cd cloudflare-workers
 pnpm install
-pnpm dev
+pnpm dev        # Local development server
+pnpm deploy     # Deploy to Cloudflare
 ```
 
-## Sharing Mechanisms
+### Web App
+```bash
+cd web-app
+pnpm install
+pnpm dev        # http://localhost:3000
+```
 
-### Web App Sharing
-- **Web Share API**: Native sharing on supported browsers
-- **Direct URL Sharing**: Shareable profile/stats URLs
-- **Image Export**: Generate beautiful stat cards as downloadable images
-- **Embed Widgets**: Embeddable widgets for personal websites/blogs
+## Roadmap
 
-### iOS App Sharing
-- **Share Sheet**: Native iOS share sheet integration
-- **Widgets**: Home screen widgets showing daily/weekly progress
-- **iMessage App**: Share achievements directly in iMessage
-- **App Clips**: Quick access for friends to see your stats
+- **v1**: Timer + encrypted sync (web + backend)
+- **v2**: Heatmaps, stats, goals, streaks
+- **v3**: iOS app, sharing, social features
+- **v4**: Polish, App Store, marketing
 
-## API Overview
+## Privacy
 
-The Cloudflare Workers backend exposes a RESTful API:
+The server stores only:
+- Your public key (your "address")
+- Encrypted blobs it cannot read
+- Timestamps of when blobs were stored
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/auth/*` | POST | Authentication endpoints |
-| `/api/sessions` | GET/POST | Outdoor time sessions |
-| `/api/stats` | GET | User statistics |
-| `/api/goals` | GET/POST/PUT | Goal management |
-| `/api/share` | POST | Generate shareable content |
+It does **not** store or have access to: your name, email, timer data, session history, or any plaintext whatsoever.
 
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+**Lost your key = lost your data.** There is no recovery mechanism on the server. Back up your key.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details.
