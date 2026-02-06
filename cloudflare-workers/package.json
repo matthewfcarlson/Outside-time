@@ -1,0 +1,22 @@
+{
+  "name": "outside-time-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute outside-time-db --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute outside-time-db --file=./schema.sql",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0",
+    "wrangler": "^3.25.0"
+  }
+}
