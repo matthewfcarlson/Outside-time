@@ -1,0 +1,156 @@
+import { describe, it, expect } from 'vitest';
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
+import { verifySignature, isValidPublicKey } from '../src/crypto';
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+describe('isValidPublicKey', () => {
+  it('accepts a valid 64-character lowercase hex string', () => {
+    expect(isValidPublicKey('a'.repeat(64))).toBe(true);
+    expect(isValidPublicKey('0123456789abcdef'.repeat(4))).toBe(true);
+  });
+
+  it('rejects uppercase hex', () => {
+    expect(isValidPublicKey('A'.repeat(64))).toBe(false);
+  });
+
+  it('rejects strings shorter than 64 chars', () => {
+    expect(isValidPublicKey('a'.repeat(63))).toBe(false);
+  });
+
+  it('rejects strings longer than 64 chars', () => {
+    expect(isValidPublicKey('a'.repeat(65))).toBe(false);
+  });
+
+  it('rejects non-hex characters', () => {
+    expect(isValidPublicKey('g'.repeat(64))).toBe(false);
+    expect(isValidPublicKey('z'.repeat(64))).toBe(false);
+  });
+
+  it('rejects empty string', () => {
+    expect(isValidPublicKey('')).toBe(false);
+  });
+});
+
+describe('verifySignature', () => {
+  it('verifies a valid signature', () => {
+    const keyPair = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair.publicKey);
+    const seq = 1;
+    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+
+    const message = new TextEncoder().encode(
+      `${publicKeyHex}:${seq}:${ciphertextBase64}`
+    );
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signatureBase64 = encodeBase64(signature);
+
+    expect(
+      verifySignature(publicKeyHex, seq, ciphertextBase64, signatureBase64)
+    ).toBe(true);
+  });
+
+  it('rejects a signature from a different key', () => {
+    const keyPair1 = nacl.sign.keyPair();
+    const keyPair2 = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair1.publicKey);
+    const seq = 1;
+    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+
+    // Sign with key2 but claim key1
+    const message = new TextEncoder().encode(
+      `${publicKeyHex}:${seq}:${ciphertextBase64}`
+    );
+    const signature = nacl.sign.detached(message, keyPair2.secretKey);
+    const signatureBase64 = encodeBase64(signature);
+
+    expect(
+      verifySignature(publicKeyHex, seq, ciphertextBase64, signatureBase64)
+    ).toBe(false);
+  });
+
+  it('rejects a tampered ciphertext', () => {
+    const keyPair = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair.publicKey);
+    const seq = 1;
+    const originalCiphertext = encodeBase64(nacl.randomBytes(32));
+    const tamperedCiphertext = encodeBase64(nacl.randomBytes(32));
+
+    const message = new TextEncoder().encode(
+      `${publicKeyHex}:${seq}:${originalCiphertext}`
+    );
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signatureBase64 = encodeBase64(signature);
+
+    // Verify with tampered ciphertext
+    expect(
+      verifySignature(publicKeyHex, seq, tamperedCiphertext, signatureBase64)
+    ).toBe(false);
+  });
+
+  it('rejects a tampered sequence number', () => {
+    const keyPair = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair.publicKey);
+    const seq = 1;
+    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+
+    const message = new TextEncoder().encode(
+      `${publicKeyHex}:${seq}:${ciphertextBase64}`
+    );
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signatureBase64 = encodeBase64(signature);
+
+    // Verify with different seq
+    expect(
+      verifySignature(publicKeyHex, 2, ciphertextBase64, signatureBase64)
+    ).toBe(false);
+  });
+
+  it('rejects an invalid signature format', () => {
+    const keyPair = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair.publicKey);
+
+    expect(
+      verifySignature(publicKeyHex, 1, 'somedata', 'not-valid-base64!!!')
+    ).toBe(false);
+  });
+
+  it('rejects a truncated signature', () => {
+    const keyPair = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair.publicKey);
+    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+
+    // Only 32 bytes instead of 64
+    const shortSig = encodeBase64(nacl.randomBytes(32));
+
+    expect(
+      verifySignature(publicKeyHex, 1, ciphertextBase64, shortSig)
+    ).toBe(false);
+  });
+
+  it('rejects an invalid public key (too short)', () => {
+    expect(verifySignature('abcd', 1, 'data', 'sig')).toBe(false);
+  });
+
+  it('handles edge case of empty ciphertext', () => {
+    const keyPair = nacl.sign.keyPair();
+    const publicKeyHex = bytesToHex(keyPair.publicKey);
+    const seq = 1;
+    const ciphertextBase64 = '';
+
+    const message = new TextEncoder().encode(
+      `${publicKeyHex}:${seq}:${ciphertextBase64}`
+    );
+    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signatureBase64 = encodeBase64(signature);
+
+    expect(
+      verifySignature(publicKeyHex, seq, ciphertextBase64, signatureBase64)
+    ).toBe(true);
+  });
+});
