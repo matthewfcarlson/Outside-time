@@ -1,11 +1,16 @@
-import nacl from 'tweetnacl';
-import { encodeBase64 } from 'tweetnacl-util';
+import {
+  generateSigningKeyPair,
+  signDetached,
+  encodeBase64,
+  randomBytes,
+  bytesToHex,
+} from '../src/crypto';
 
 /**
  * Generate a test identity: Ed25519 signing keypair with hex-encoded public key.
  */
 export function generateTestIdentity() {
-  const keyPair = nacl.sign.keyPair();
+  const keyPair = generateSigningKeyPair();
   const publicKeyHex = bytesToHex(keyPair.publicKey);
   return { keyPair, publicKeyHex };
 }
@@ -22,7 +27,7 @@ export function signAppendRequest(
   const message = new TextEncoder().encode(
     `${publicKeyHex}:${ciphertextBase64}`
   );
-  const signature = nacl.sign.detached(message, secretKey);
+  const signature = signDetached(message, secretKey);
   return encodeBase64(signature);
 }
 
@@ -30,12 +35,6 @@ export function signAppendRequest(
  * Create a fake ciphertext payload (base64-encoded random bytes).
  */
 export function fakeCiphertext(size = 64): string {
-  const bytes = nacl.randomBytes(size);
+  const bytes = randomBytes(size);
   return encodeBase64(bytes);
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }

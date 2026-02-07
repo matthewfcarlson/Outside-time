@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import nacl from 'tweetnacl';
-import { encodeBase64 } from 'tweetnacl-util';
-import { verifySignature, isValidPublicKey } from '../src/crypto';
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+import {
+  verifySignature,
+  isValidPublicKey,
+  generateSigningKeyPair,
+  signDetached,
+  encodeBase64,
+  randomBytes,
+  bytesToHex,
+} from '../src/crypto';
 
 describe('isValidPublicKey', () => {
   it('accepts a valid 64-character lowercase hex string', () => {
@@ -39,14 +39,14 @@ describe('isValidPublicKey', () => {
 
 describe('verifySignature', () => {
   it('verifies a valid signature', () => {
-    const keyPair = nacl.sign.keyPair();
+    const keyPair = generateSigningKeyPair();
     const publicKeyHex = bytesToHex(keyPair.publicKey);
-    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+    const ciphertextBase64 = encodeBase64(randomBytes(32));
 
     const message = new TextEncoder().encode(
       `${publicKeyHex}:${ciphertextBase64}`
     );
-    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signature = signDetached(message, keyPair.secretKey);
     const signatureBase64 = encodeBase64(signature);
 
     expect(
@@ -55,16 +55,16 @@ describe('verifySignature', () => {
   });
 
   it('rejects a signature from a different key', () => {
-    const keyPair1 = nacl.sign.keyPair();
-    const keyPair2 = nacl.sign.keyPair();
+    const keyPair1 = generateSigningKeyPair();
+    const keyPair2 = generateSigningKeyPair();
     const publicKeyHex = bytesToHex(keyPair1.publicKey);
-    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+    const ciphertextBase64 = encodeBase64(randomBytes(32));
 
     // Sign with key2 but claim key1
     const message = new TextEncoder().encode(
       `${publicKeyHex}:${ciphertextBase64}`
     );
-    const signature = nacl.sign.detached(message, keyPair2.secretKey);
+    const signature = signDetached(message, keyPair2.secretKey);
     const signatureBase64 = encodeBase64(signature);
 
     expect(
@@ -73,15 +73,15 @@ describe('verifySignature', () => {
   });
 
   it('rejects a tampered ciphertext', () => {
-    const keyPair = nacl.sign.keyPair();
+    const keyPair = generateSigningKeyPair();
     const publicKeyHex = bytesToHex(keyPair.publicKey);
-    const originalCiphertext = encodeBase64(nacl.randomBytes(32));
-    const tamperedCiphertext = encodeBase64(nacl.randomBytes(32));
+    const originalCiphertext = encodeBase64(randomBytes(32));
+    const tamperedCiphertext = encodeBase64(randomBytes(32));
 
     const message = new TextEncoder().encode(
       `${publicKeyHex}:${originalCiphertext}`
     );
-    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signature = signDetached(message, keyPair.secretKey);
     const signatureBase64 = encodeBase64(signature);
 
     // Verify with tampered ciphertext
@@ -91,7 +91,7 @@ describe('verifySignature', () => {
   });
 
   it('rejects an invalid signature format', () => {
-    const keyPair = nacl.sign.keyPair();
+    const keyPair = generateSigningKeyPair();
     const publicKeyHex = bytesToHex(keyPair.publicKey);
 
     expect(
@@ -100,12 +100,12 @@ describe('verifySignature', () => {
   });
 
   it('rejects a truncated signature', () => {
-    const keyPair = nacl.sign.keyPair();
+    const keyPair = generateSigningKeyPair();
     const publicKeyHex = bytesToHex(keyPair.publicKey);
-    const ciphertextBase64 = encodeBase64(nacl.randomBytes(32));
+    const ciphertextBase64 = encodeBase64(randomBytes(32));
 
     // Only 32 bytes instead of 64
-    const shortSig = encodeBase64(nacl.randomBytes(32));
+    const shortSig = encodeBase64(randomBytes(32));
 
     expect(
       verifySignature(publicKeyHex, ciphertextBase64, shortSig)
@@ -117,14 +117,14 @@ describe('verifySignature', () => {
   });
 
   it('handles edge case of empty ciphertext', () => {
-    const keyPair = nacl.sign.keyPair();
+    const keyPair = generateSigningKeyPair();
     const publicKeyHex = bytesToHex(keyPair.publicKey);
     const ciphertextBase64 = '';
 
     const message = new TextEncoder().encode(
       `${publicKeyHex}:${ciphertextBase64}`
     );
-    const signature = nacl.sign.detached(message, keyPair.secretKey);
+    const signature = signDetached(message, keyPair.secretKey);
     const signatureBase64 = encodeBase64(signature);
 
     expect(
