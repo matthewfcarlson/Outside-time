@@ -579,4 +579,35 @@ describe('Rate limiting', () => {
     );
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
+
+  it('returns 429 when per-IP rate limit is exceeded', async () => {
+    const { publicKeyHex } = generateTestIdentity();
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { IP_LIMITER: mockLimiter(false) }
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it('per-IP limit blocks before per-key limit is checked', async () => {
+    const { keyPair, publicKeyHex } = generateTestIdentity();
+    const ct = fakeCiphertext();
+    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, ct);
+
+    // IP limiter denies, write limiter allows — should still be 429
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { IP_LIMITER: mockLimiter(false), WRITE_LIMITER: mockLimiter(true) },
+      { method: 'POST', headers: { 'X-Signature': sig }, body: ct }
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it('per-IP limit applies to health endpoint too', async () => {
+    const res = await rateLimitedFetch(
+      '/health',
+      { IP_LIMITER: mockLimiter(false) }
+    );
+    expect(res.status).toBe(429);
+  });
 });

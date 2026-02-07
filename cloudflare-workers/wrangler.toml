@@ -21,3 +21,10 @@ name = "READ_LIMITER"
 type = "ratelimit"
 namespace_id = "1002"
 simple = { limit = 600, period = 60 }
+
+# Rate limiting: per-IP — 300 requests per 60s across all endpoints per location
+[[unsafe.bindings]]
+name = "IP_LIMITER"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 300, period = 60 }
