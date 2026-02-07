@@ -32,8 +32,17 @@ export async function handleAppend(
     );
   }
 
-  // Read body as base64 ciphertext
-  const ciphertextBase64 = await request.text();
+  // Read body as JSON and extract ciphertext
+  let ciphertextBase64: string;
+  try {
+    const body = await request.json<{ ciphertext?: string }>();
+    ciphertextBase64 = body.ciphertext ?? '';
+  } catch {
+    return jsonResponse<ErrorResponse>(
+      { error: 'Request body must be JSON with a "ciphertext" field' },
+      400
+    );
+  }
   if (!ciphertextBase64 || ciphertextBase64.length === 0) {
     return jsonResponse<ErrorResponse>(
       { error: 'Request body must contain base64-encoded ciphertext' },
