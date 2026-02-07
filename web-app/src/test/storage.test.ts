@@ -153,9 +153,12 @@ describe('EventCache', () => {
   // ── Robustness ────────────────────────────────────────────────────
 
   describe('corrupted data handling', () => {
-    it('handles invalid JSON in events gracefully', () => {
-      store.setItem(`ot:${pubKey}:events`, 'not valid json');
-      expect(cache.getCachedEvents(pubKey)).toEqual([]);
+    it('handles invalid JSON in individual event gracefully', () => {
+      store.setItem(`ot:${pubKey}:eventCount`, '2');
+      store.setItem(`ot:${pubKey}:event:0`, JSON.stringify(makeEvent(1)));
+      store.setItem(`ot:${pubKey}:event:1`, 'not valid json');
+      // Should skip the corrupt entry and return only the valid one
+      expect(cache.getCachedEvents(pubKey)).toEqual([makeEvent(1)]);
     });
 
     it('handles non-numeric lastSeq gracefully', () => {
@@ -166,6 +169,31 @@ describe('EventCache', () => {
     it('handles non-numeric lastSyncAt gracefully', () => {
       store.setItem(`ot:${pubKey}:lastSyncAt`, 'garbage');
       expect(cache.getLastSyncAt(pubKey)).toBe(0);
+    });
+
+    it('handles non-numeric eventCount gracefully', () => {
+      store.setItem(`ot:${pubKey}:eventCount`, 'garbage');
+      expect(cache.getCachedEvents(pubKey)).toEqual([]);
+    });
+  });
+
+  // ── Migration ──────────────────────────────────────────────────────
+
+  describe('migration from old single-array format', () => {
+    it('migrates old events array to per-event keys', () => {
+      const events = [makeEvent(1), makeEvent(2), makeEvent(3)];
+      store.setItem(`ot:${pubKey}:events`, JSON.stringify(events));
+      store.setItem(`ot:${pubKey}:lastSeq`, '3');
+
+      expect(cache.getCachedEvents(pubKey)).toEqual(events);
+      // Old key should be removed after migration
+      expect(store.getItem(`ot:${pubKey}:events`)).toBeNull();
+    });
+
+    it('handles corrupt old format gracefully', () => {
+      store.setItem(`ot:${pubKey}:events`, 'not valid json');
+      expect(cache.getCachedEvents(pubKey)).toEqual([]);
+      expect(store.getItem(`ot:${pubKey}:events`)).toBeNull();
     });
   });
 });

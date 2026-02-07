@@ -4,9 +4,9 @@
   import SessionLog from './lib/components/SessionLog.svelte';
   import IdentityQR from './lib/components/IdentityQR.svelte';
   import SyncStatus from './lib/components/SyncStatus.svelte';
-  import { loadEvents, saveEvents, reconstructSessions, type Session } from './lib/session';
+  import { loadEvents, appendEvent, reconstructSessions, type Session } from './lib/session';
   import { ApiClient } from './lib/api';
-  import { SyncEngine, type DecryptedServerEvent } from './lib/sync';
+  import { SyncEngine } from './lib/sync';
   import { EventCache } from './lib/storage';
   import {
     generateIdentity,
@@ -67,6 +67,7 @@
   let lastSyncAt = $state(0);
   let showSettings = $state(false);
   let debugMode = $state(localStorage.getItem('ot:debugMode') === 'true');
+  let seqMap = $state(new Map<string, number>());
 
   function refresh() {
     events = loadEvents();
@@ -82,7 +83,10 @@
     if (!API_BASE) return; // No API configured, local-only mode
     try {
       syncState = 'syncing';
-      await syncEngine.push(event);
+      const result = await syncEngine.push(event);
+      const updated = new Map(seqMap);
+      updated.set(event.id, result.seq);
+      seqMap = updated;
       lastSyncAt = Math.floor(Date.now() / 1000);
       syncState = 'idle';
     } catch (e) {
@@ -98,14 +102,21 @@
       syncState = 'syncing';
       const decrypted = await syncEngine.pull();
 
+      // Build seq map from all server-known events
+      const map = new Map<string, number>();
+      for (const d of decrypted) {
+        map.set(d.event.id, d.seq);
+      }
+      seqMap = map;
+
       // Merge server events into local storage (deduplicate by id)
       const local = loadEvents();
       const localIds = new Set(local.map((e) => e.id));
       const newEvents = decrypted
         .map((d) => d.event)
         .filter((e) => !localIds.has(e.id));
-      if (newEvents.length > 0) {
-        saveEvents([...local, ...newEvents]);
+      for (const event of newEvents) {
+        appendEvent(event);
       }
 
       lastSyncAt = Math.floor(Date.now() / 1000);
@@ -172,7 +183,7 @@
 
   <Timer onchange={refresh} onpush={pushEvent} />
   <Summary {sessions} />
-  <SessionLog {sessions} {events} {debugMode} onchange={refresh} onpush={pushEvent} />
+  <SessionLog {sessions} {events} {debugMode} {seqMap} onchange={refresh} onpush={pushEvent} />
 </main>
 
 <style>

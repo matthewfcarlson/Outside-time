@@ -11,10 +11,11 @@
   } from '../session';
   import { createManualEntry, createCorrection } from '../events';
 
-  let { sessions, events: allEvents, debugMode, onchange, onpush }: {
+  let { sessions, events: allEvents, debugMode, seqMap, onchange, onpush }: {
     sessions: Session[];
     events: OutsideEvent[];
     debugMode: boolean;
+    seqMap: Map<string, number>;
     onchange: () => void;
     onpush: (event: OutsideEvent) => Promise<void>;
   } = $props();
@@ -186,7 +187,14 @@
               <div class="debug-panel">
                 <div class="debug-title">Related Events</div>
                 {#each getRelatedEvents(session.id) as evt}
-                  <pre class="debug-json">{JSON.stringify(evt, null, 2)}</pre>
+                  <div class="debug-event">
+                    {#if seqMap.has(evt.id)}
+                      <span class="debug-seq synced">seq: {seqMap.get(evt.id)}</span>
+                    {:else}
+                      <span class="debug-seq unsynced">unsynced</span>
+                    {/if}
+                    <pre class="debug-json">{JSON.stringify(evt, null, 2)}</pre>
+                  </div>
                 {/each}
               </div>
             {/if}
@@ -436,7 +444,36 @@
     word-break: break-all;
   }
 
-  .debug-json:last-child {
+  .debug-event {
+    margin-bottom: 0.375rem;
+  }
+
+  .debug-event:last-child {
     margin-bottom: 0;
+  }
+
+  .debug-event:last-child .debug-json {
+    margin-bottom: 0;
+  }
+
+  .debug-seq {
+    display: inline-block;
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .debug-seq.synced {
+    background: #d1e7dd;
+    color: #0f5132;
+  }
+
+  .debug-seq.unsynced {
+    background: #fff3cd;
+    color: #664d03;
   }
 </style>
