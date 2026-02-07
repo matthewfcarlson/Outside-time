@@ -77,29 +77,27 @@ describe('GET /health', () => {
   });
 });
 
-// ─── 404 Handling ──────────────────────────────────────────────────────
+// ─── Static Asset Fallback ────────────────────────────────────────────
 
-describe('404 Not Found', () => {
-  it('returns 404 for unknown routes', async () => {
+describe('Static asset fallback', () => {
+  it('serves assets for unknown routes', async () => {
     const res = await workerFetch('/unknown');
-    expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body).toEqual({ error: 'Not found' });
+    expect(res.status).toBe(200);
   });
 
-  it('returns 404 for /api/log without a key', async () => {
+  it('serves assets for /api/log without a key', async () => {
     const res = await workerFetch('/api/log/');
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 
-  it('returns 404 for invalid public key format in URL', async () => {
+  it('serves assets for invalid public key format in URL', async () => {
     const res = await workerFetch('/api/log/not-a-hex-key');
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 
-  it('returns 404 for too-short public key in URL', async () => {
+  it('serves assets for too-short public key in URL', async () => {
     const res = await workerFetch('/api/log/abcdef1234');
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 });
 

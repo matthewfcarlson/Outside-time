@@ -4,6 +4,7 @@ export interface RateLimiter {
 
 export interface Env {
   DB: D1Database;
+  ASSETS: Fetcher;
   WRITE_LIMITER?: RateLimiter;
   READ_LIMITER?: RateLimiter;
   IP_LIMITER?: RateLimiter;
