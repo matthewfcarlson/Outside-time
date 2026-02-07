@@ -285,6 +285,36 @@ export function reconstructSessions(events: OutsideEvent[]): Session[] {
     .sort((a, b) => b.startedAt - a.startedAt);
 }
 
+/** Find an active (unmatched) timer_start event — one with no corresponding timer_stop or deletion. */
+export function findActiveTimerStart(events: OutsideEvent[]): TimerStartEvent | null {
+  const matchedStartIds = new Set<string>();
+  const deletedIds = new Set<string>();
+
+  for (const event of events) {
+    if (event.type === 'timer_stop') {
+      matchedStartIds.add(event.data.start_event_id);
+    }
+    if (event.type === 'correction' && event.data.action === 'delete') {
+      deletedIds.add(event.data.corrects_event_id);
+    }
+  }
+
+  let latest: TimerStartEvent | null = null;
+  for (const event of events) {
+    if (
+      event.type === 'timer_start' &&
+      !matchedStartIds.has(event.id) &&
+      !deletedIds.has(event.id)
+    ) {
+      if (!latest || event.ts > latest.ts) {
+        latest = event;
+      }
+    }
+  }
+
+  return latest;
+}
+
 // ─── Display helpers ───────────────────────────────────────────────────
 
 export function formatDuration(minutes: number): string {

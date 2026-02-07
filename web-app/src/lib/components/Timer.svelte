@@ -7,10 +7,35 @@
     formatElapsed,
   } from '../session';
 
-  let { onchange, onpush }: { onchange: () => void; onpush: (event: OutsideEvent) => Promise<void> } = $props();
+  let { onchange, onpush, pullCount = 0 }: { onchange: () => void; onpush: (event: OutsideEvent) => Promise<void>; pullCount?: number } = $props();
 
   let activeTimer: TimerStartEvent | null = $state(loadActiveTimer());
   let elapsed = $state(0);
+
+  // Cross-tab sync: listen for storage changes from other tabs
+  $effect(() => {
+    function handleStorage(e: StorageEvent) {
+      if (e.key === 'ot:local:activeTimer') {
+        const loaded = loadActiveTimer();
+        activeTimer = loaded;
+        if (!loaded) elapsed = 0;
+      }
+    }
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  });
+
+  // Cross-device sync: re-read active timer after pull completes
+  $effect(() => {
+    void pullCount;
+    const loaded = loadActiveTimer();
+    const loadedId = loaded?.id ?? null;
+    const currentId = activeTimer?.id ?? null;
+    if (loadedId !== currentId) {
+      activeTimer = loaded;
+      if (!loaded) elapsed = 0;
+    }
+  });
 
   function startTimer() {
     const event = createTimerStart();
