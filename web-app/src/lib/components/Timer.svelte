@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createTimerStart, createTimerStop, type TimerStartEvent } from '../events';
+  import { createTimerStart, createTimerStop, type TimerStartEvent, type OutsideEvent } from '../events';
   import {
     appendEvent,
     loadActiveTimer,
@@ -7,7 +7,7 @@
     formatElapsed,
   } from '../session';
 
-  let { onchange }: { onchange: () => void } = $props();
+  let { onchange, onpush }: { onchange: () => void; onpush: (event: OutsideEvent) => Promise<void> } = $props();
 
   let activeTimer: TimerStartEvent | null = $state(loadActiveTimer());
   let elapsed = $state(0);
@@ -18,6 +18,7 @@
     saveActiveTimer(event);
     activeTimer = event;
     onchange();
+    onpush(event);
   }
 
   function stopTimer() {
@@ -28,6 +29,7 @@
     activeTimer = null;
     elapsed = 0;
     onchange();
+    onpush(event);
   }
 
   $effect(() => {

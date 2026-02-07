@@ -20,8 +20,14 @@ export interface Session {
   id: string;
   startedAt: number; // Unix timestamp (seconds)
   endedAt: number; // Unix timestamp (seconds)
-  durationMinutes: number;
+  durationMinutes: number; // Rounded up to nearest minute
   source: 'timer' | 'manual';
+}
+
+/** Round minutes up to the nearest whole minute (minimum 1 minute) */
+export function roundUpToMinute(minutes: number): number {
+  if (minutes <= 0) return 0;
+  return Math.max(1, Math.ceil(minutes));
 }
 
 // ─── Local event storage ───────────────────────────────────────────────
@@ -91,7 +97,7 @@ export function reconstructSessions(events: OutsideEvent[]): Session[] {
             id: start.id,
             startedAt: start.ts,
             endedAt: event.ts,
-            durationMinutes: event.data.duration_minutes,
+            durationMinutes: roundUpToMinute(event.data.duration_minutes),
             source: 'timer',
           });
           pendingStarts.delete(start.id);
@@ -104,7 +110,7 @@ export function reconstructSessions(events: OutsideEvent[]): Session[] {
           id: event.id,
           startedAt: event.data.started_at,
           endedAt: event.data.ended_at,
-          durationMinutes: event.data.duration_minutes,
+          durationMinutes: roundUpToMinute(event.data.duration_minutes),
           source: 'manual',
         });
         break;
@@ -120,7 +126,7 @@ export function reconstructSessions(events: OutsideEvent[]): Session[] {
               ...existing,
               startedAt: event.data.replacement.started_at,
               endedAt: event.data.replacement.ended_at,
-              durationMinutes: event.data.replacement.duration_minutes,
+              durationMinutes: roundUpToMinute(event.data.replacement.duration_minutes),
             });
           }
         }
@@ -137,12 +143,9 @@ export function reconstructSessions(events: OutsideEvent[]): Session[] {
 
 export function formatDuration(minutes: number): string {
   if (minutes <= 0) return '0m';
-  if (minutes < 1) {
-    const secs = Math.round(minutes * 60);
-    return `${secs}s`;
-  }
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
+  const rounded = Math.ceil(minutes);
+  const h = Math.floor(rounded / 60);
+  const m = rounded % 60;
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
