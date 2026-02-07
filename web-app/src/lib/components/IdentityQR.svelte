@@ -7,6 +7,8 @@
   let showQR = $state(false);
   let showWarning = $state(false);
   let qrDataUrl = $state('');
+  let syncUrl = $state('');
+  let copyLabel = $state('Copy URL to Clipboard');
 
   function requestShowQR() {
     showWarning = true;
@@ -15,9 +17,9 @@
   async function confirmShowQR() {
     showWarning = false;
     const secretKeyBase64 = exportSecretKey(identity);
-    const url = `${window.location.origin}${window.location.pathname}#key=${encodeURIComponent(secretKeyBase64)}`;
+    syncUrl = `${window.location.origin}${window.location.pathname}#key=${encodeURIComponent(secretKeyBase64)}`;
     try {
-      qrDataUrl = await QRCode.toDataURL(url, {
+      qrDataUrl = await QRCode.toDataURL(syncUrl, {
         width: 256,
         margin: 2,
         color: { dark: '#212529', light: '#ffffff' },
@@ -31,6 +33,23 @@
   function hideQR() {
     showQR = false;
     qrDataUrl = '';
+    syncUrl = '';
+    copyLabel = 'Copy URL to Clipboard';
+  }
+
+  async function copyUrl() {
+    try {
+      await navigator.clipboard.writeText(syncUrl);
+      copyLabel = 'Copied!';
+      setTimeout(() => {
+        copyLabel = 'Copy URL to Clipboard';
+      }, 2000);
+    } catch {
+      copyLabel = 'Copy failed';
+      setTimeout(() => {
+        copyLabel = 'Copy URL to Clipboard';
+      }, 2000);
+    }
   }
 
   function cancelWarning() {
@@ -73,7 +92,10 @@
     <div class="qr-container">
       <img src={qrDataUrl} alt="Identity QR Code" class="qr-image" />
       <p class="qr-hint">Scan on another device to sync your identity.</p>
-      <button class="btn cancel" onclick={hideQR}>Hide QR Code</button>
+      <div class="qr-actions">
+        <button class="btn primary" onclick={copyUrl}>{copyLabel}</button>
+        <button class="btn cancel" onclick={hideQR}>Hide QR Code</button>
+      </div>
     </div>
   {:else}
     <button class="btn primary" onclick={requestShowQR}>
@@ -153,6 +175,13 @@
     margin: 0 0 0.75rem;
     font-size: 0.8125rem;
     color: #6c757d;
+  }
+
+  .qr-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
   }
 
   .btn {
