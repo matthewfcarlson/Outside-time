@@ -2,25 +2,132 @@
   import Timer from './lib/components/Timer.svelte';
   import Summary from './lib/components/Summary.svelte';
   import SessionLog from './lib/components/SessionLog.svelte';
+  import IdentityQR from './lib/components/IdentityQR.svelte';
+  import SyncStatus from './lib/components/SyncStatus.svelte';
   import { loadEvents, reconstructSessions, type Session } from './lib/session';
+  import { ApiClient } from './lib/api';
+  import { SyncEngine, type DecryptedServerEvent } from './lib/sync';
+  import { EventCache } from './lib/storage';
+  import {
+    generateIdentity,
+    importSecretKey,
+    exportSecretKey,
+    type Identity,
+  } from './lib/crypto';
+  import type { OutsideEvent } from './lib/events';
 
+  // ─── API Configuration ─────────────────────────────────────────────
+  const API_BASE = import.meta.env.VITE_API_BASE ?? '';
+
+  // ─── Identity ──────────────────────────────────────────────────────
+  const cache = new EventCache();
+
+  function getOrCreateIdentity(): Identity {
+    // Check URL hash for imported identity: #key=BASE64_SECRET_KEY
+    const hash = window.location.hash;
+    if (hash.startsWith('#key=')) {
+      const keyBase64 = decodeURIComponent(hash.slice(5));
+      try {
+        const identity = importSecretKey(keyBase64);
+        cache.saveIdentity(keyBase64);
+        // Clear the hash to avoid leaking the key in browser history
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        return identity;
+      } catch (e) {
+        console.warn('Failed to import identity from URL hash:', e);
+      }
+    }
+
+    // Try loading from localStorage
+    const saved = cache.loadIdentity();
+    if (saved) {
+      try {
+        return importSecretKey(saved);
+      } catch {
+        console.warn('Corrupt saved identity, generating new one');
+      }
+    }
+
+    // Generate fresh identity
+    const identity = generateIdentity();
+    cache.saveIdentity(exportSecretKey(identity));
+    return identity;
+  }
+
+  const identity = getOrCreateIdentity();
+
+  // ─── Sync Engine ───────────────────────────────────────────────────
+  const api = new ApiClient(API_BASE);
+  const syncEngine = new SyncEngine(api, cache, identity);
+
+  // ─── State ─────────────────────────────────────────────────────────
   let events = $state(loadEvents());
   let sessions: Session[] = $derived(reconstructSessions(events));
+  let syncState = $state<'idle' | 'syncing' | 'error' | 'offline'>('idle');
+  let lastSyncAt = $state(0);
+  let showSettings = $state(false);
 
   function refresh() {
     events = loadEvents();
   }
+
+  // ─── Sync: push a single event to the server ──────────────────────
+  async function pushEvent(event: OutsideEvent): Promise<void> {
+    if (!API_BASE) return; // No API configured, local-only mode
+    try {
+      syncState = 'syncing';
+      await syncEngine.push(event);
+      lastSyncAt = Math.floor(Date.now() / 1000);
+      syncState = 'idle';
+    } catch (e) {
+      console.warn('Push failed (event saved locally):', e);
+      syncState = 'error';
+    }
+  }
+
+  // ─── Sync: pull events from server ─────────────────────────────────
+  async function pullEvents(): Promise<void> {
+    if (!API_BASE) return;
+    try {
+      syncState = 'syncing';
+      await syncEngine.pull();
+      lastSyncAt = Math.floor(Date.now() / 1000);
+      syncState = 'idle';
+    } catch (e) {
+      console.warn('Pull failed:', e);
+      syncState = navigator.onLine ? 'error' : 'offline';
+    }
+  }
+
+  // Pull on initial load
+  $effect(() => {
+    pullEvents();
+  });
 </script>
 
 <main>
   <header>
     <h1>Outside Time</h1>
     <p class="tagline">Track your outdoor time, privately.</p>
+    <button
+      class="settings-toggle"
+      onclick={() => (showSettings = !showSettings)}
+      aria-label="Settings"
+    >
+      {showSettings ? 'Close' : 'Settings'}
+    </button>
   </header>
 
-  <Timer onchange={refresh} />
+  {#if showSettings}
+    <section class="settings-panel">
+      <IdentityQR {identity} />
+      <SyncStatus state={syncState} {lastSyncAt} onSync={pullEvents} />
+    </section>
+  {/if}
+
+  <Timer onchange={refresh} onpush={pushEvent} />
   <Summary {sessions} />
-  <SessionLog {sessions} onchange={refresh} />
+  <SessionLog {sessions} onchange={refresh} onpush={pushEvent} />
 </main>
 
 <style>
@@ -48,6 +155,7 @@
   header {
     text-align: center;
     padding: 1.5rem 1rem 0;
+    position: relative;
   }
 
   h1 {
@@ -61,5 +169,31 @@
     margin: 0;
     font-size: 0.875rem;
     color: #6c757d;
+  }
+
+  .settings-toggle {
+    position: absolute;
+    top: 1.5rem;
+    right: 1rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    background: #e9ecef;
+    color: #495057;
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+  }
+
+  .settings-toggle:hover {
+    background: #dee2e6;
+  }
+
+  .settings-panel {
+    padding: 1rem;
+    margin: 1rem 1rem 0;
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
 </style>

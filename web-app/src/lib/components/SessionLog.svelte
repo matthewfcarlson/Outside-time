@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Session } from '../session';
+  import type { OutsideEvent } from '../events';
   import {
     appendEvent,
     formatTime,
@@ -10,7 +11,7 @@
   } from '../session';
   import { createManualEntry, createCorrection } from '../events';
 
-  let { sessions, onchange }: { sessions: Session[]; onchange: () => void } = $props();
+  let { sessions, onchange, onpush }: { sessions: Session[]; onchange: () => void; onpush: (event: OutsideEvent) => Promise<void> } = $props();
 
   let editingId: string | null = $state(null);
   let editStart = $state('');
@@ -45,6 +46,7 @@
     appendEvent(correction);
     editingId = null;
     onchange();
+    onpush(correction);
   }
 
   function deleteSession(id: string) {
@@ -52,6 +54,7 @@
     const correction = createCorrection(id, 'delete');
     appendEvent(correction);
     onchange();
+    onpush(correction);
   }
 
   function openManualForm() {
@@ -75,6 +78,7 @@
     appendEvent(entry);
     showManualForm = false;
     onchange();
+    onpush(entry);
   }
 
   function isToday(unixSeconds: number): boolean {

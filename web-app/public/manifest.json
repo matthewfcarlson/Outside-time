@@ -1,0 +1,23 @@
+{
+  "name": "Outside Time",
+  "short_name": "Outside Time",
+  "description": "Track your outdoor time, privately.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f2f0",
+  "theme_color": "#2d6a4f",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
