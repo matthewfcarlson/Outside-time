@@ -1,5 +1,12 @@
+export interface RateLimiter {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface Env {
   DB: D1Database;
+  WRITE_LIMITER?: RateLimiter;
+  READ_LIMITER?: RateLimiter;
+  IP_LIMITER?: RateLimiter;
 }
 
 export interface EventRow {

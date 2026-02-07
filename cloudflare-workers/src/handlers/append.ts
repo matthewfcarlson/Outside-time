@@ -57,23 +57,19 @@ export async function handleAppend(
     );
   }
 
-  // Determine next sequence number
-  const latest = await env.DB.prepare(
-    'SELECT MAX(seq) as max_seq FROM events WHERE public_key = ?'
-  )
-    .bind(publicKey)
-    .first<{ max_seq: number | null }>();
-
-  const seq = (latest?.max_seq ?? 0) + 1;
-
-  // Insert the event
+  // Atomically determine next sequence number and insert in one statement.
+  // This avoids a race where two concurrent requests both read the same
+  // MAX(seq) and then collide on INSERT.
   const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    'INSERT INTO events (public_key, seq, ciphertext, created_at) VALUES (?, ?, ?, ?)'
+  const result = await env.DB.prepare(
+    `INSERT INTO events (public_key, seq, ciphertext, created_at)
+     VALUES (?1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE public_key = ?1), ?2, ?3)
+     RETURNING seq`
   )
-    .bind(publicKey, seq, ciphertextBase64, now)
-    .run();
+    .bind(publicKey, ciphertextBase64, now)
+    .first<{ seq: number }>();
 
+  const seq = result!.seq;
   return jsonResponse<AppendResponse>({ seq, created_at: now }, 201);
 }
 
