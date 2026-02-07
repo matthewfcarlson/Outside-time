@@ -66,9 +66,15 @@
   let syncState = $state<'idle' | 'syncing' | 'error' | 'offline'>('idle');
   let lastSyncAt = $state(0);
   let showSettings = $state(false);
+  let debugMode = $state(localStorage.getItem('ot:debugMode') === 'true');
 
   function refresh() {
     events = loadEvents();
+  }
+
+  function toggleDebugMode() {
+    debugMode = !debugMode;
+    localStorage.setItem('ot:debugMode', String(debugMode));
   }
 
   // ─── Sync: push a single event to the server ──────────────────────
@@ -111,6 +117,27 @@
     }
   }
 
+  // ─── Sync: full sync (push unsynced, then pull) ──────────────────
+  async function syncAll(): Promise<void> {
+    if (!API_BASE) return;
+    try {
+      syncState = 'syncing';
+
+      // Push any local events that aren't on the server yet
+      const local = loadEvents();
+      const pushed = await syncEngine.pushUnsynced(local);
+      if (pushed > 0) {
+        console.log(`Pushed ${pushed} unsynced event(s) to server`);
+      }
+
+      // Then pull any new events from the server
+      await pullEvents();
+    } catch (e) {
+      console.warn('Sync failed:', e);
+      syncState = navigator.onLine ? 'error' : 'offline';
+    }
+  }
+
   // Pull on initial load
   $effect(() => {
     pullEvents();
@@ -133,13 +160,19 @@
   {#if showSettings}
     <section class="settings-panel">
       <IdentityQR {identity} />
-      <SyncStatus state={syncState} {lastSyncAt} onSync={pullEvents} />
+      <SyncStatus state={syncState} {lastSyncAt} onSync={syncAll} />
+      <div class="debug-toggle">
+        <label class="debug-label">
+          <input type="checkbox" checked={debugMode} onchange={toggleDebugMode} />
+          Debug mode
+        </label>
+      </div>
     </section>
   {/if}
 
   <Timer onchange={refresh} onpush={pushEvent} />
   <Summary {sessions} />
-  <SessionLog {sessions} onchange={refresh} onpush={pushEvent} />
+  <SessionLog {sessions} {events} {debugMode} onchange={refresh} onpush={pushEvent} />
 </main>
 
 <style>
@@ -207,5 +240,24 @@
     background: white;
     border-radius: 0.5rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  .debug-toggle {
+    padding-top: 0.75rem;
+    border-top: 1px solid #e9ecef;
+    margin-top: 0.75rem;
+  }
+
+  .debug-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    color: #495057;
+    cursor: pointer;
+  }
+
+  .debug-label input[type='checkbox'] {
+    accent-color: #2d6a4f;
   }
 </style>

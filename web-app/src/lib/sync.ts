@@ -137,6 +137,27 @@ export class SyncEngine {
     return decrypted;
   }
 
+  /**
+   * Push any local events that don't exist in the server cache.
+   * Compares local plaintext event IDs against decrypted cached event IDs,
+   * and pushes any that are missing from the server.
+   * Returns the number of events pushed.
+   */
+  async pushUnsynced(localEvents: OutsideEvent[]): Promise<number> {
+    const cached = this.decryptCachedEvents();
+    const serverIds = new Set(cached.map((d) => d.event.id));
+
+    const unsynced = localEvents.filter((e) => !serverIds.has(e.id));
+    let pushed = 0;
+
+    for (const event of unsynced) {
+      await this.push(event);
+      pushed++;
+    }
+
+    return pushed;
+  }
+
   /** Get sync status info */
   getSyncStatus(): {
     lastSeq: number;
