@@ -11,9 +11,16 @@
   } from '../session';
   import { createManualEntry, createCorrection } from '../events';
 
-  let { sessions, onchange, onpush }: { sessions: Session[]; onchange: () => void; onpush: (event: OutsideEvent) => Promise<void> } = $props();
+  let { sessions, events: allEvents, debugMode, onchange, onpush }: {
+    sessions: Session[];
+    events: OutsideEvent[];
+    debugMode: boolean;
+    onchange: () => void;
+    onpush: (event: OutsideEvent) => Promise<void>;
+  } = $props();
 
   let editingId: string | null = $state(null);
+  let debugId: string | null = $state(null);
   let editStart = $state('');
   let editEnd = $state('');
 
@@ -79,6 +86,19 @@
     showManualForm = false;
     onchange();
     onpush(entry);
+  }
+
+  function getRelatedEvents(sessionId: string): OutsideEvent[] {
+    return allEvents.filter((e) => {
+      if (e.id === sessionId) return true;
+      if (e.type === 'timer_stop' && e.data.start_event_id === sessionId) return true;
+      if (e.type === 'correction' && e.data.corrects_event_id === sessionId) return true;
+      return false;
+    });
+  }
+
+  function toggleDebug(sessionId: string) {
+    debugId = debugId === sessionId ? null : sessionId;
   }
 
   function isToday(unixSeconds: number): boolean {
@@ -157,8 +177,19 @@
               <div class="session-actions">
                 <button class="btn-action" onclick={() => startEdit(session)}>Edit</button>
                 <button class="btn-action delete" onclick={() => deleteSession(session.id)}>Del</button>
+                {#if debugMode}
+                  <button class="btn-action debug" onclick={() => toggleDebug(session.id)}>Debug</button>
+                {/if}
               </div>
             </div>
+            {#if debugMode && debugId === session.id}
+              <div class="debug-panel">
+                <div class="debug-title">Related Events</div>
+                {#each getRelatedEvents(session.id) as evt}
+                  <pre class="debug-json">{JSON.stringify(evt, null, 2)}</pre>
+                {/each}
+              </div>
+            {/if}
           {/if}
         </li>
       {/each}
@@ -364,5 +395,48 @@
 
   .btn-action.delete:hover {
     background: #f8d7da;
+  }
+
+  .btn-action.debug {
+    color: #6f42c1;
+  }
+
+  .btn-action.debug:hover {
+    background: #e8dff5;
+  }
+
+  .debug-panel {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+  }
+
+  .debug-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: #6f42c1;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+  }
+
+  .debug-json {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.6875rem;
+    color: #212529;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    margin: 0 0 0.375rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .debug-json:last-child {
+    margin-bottom: 0;
   }
 </style>
