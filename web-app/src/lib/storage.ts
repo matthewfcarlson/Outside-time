@@ -4,14 +4,18 @@
  * Caches encrypted events (as received from the server) in localStorage so
  * the client doesn't re-download the entire log on every page load.
  *
+ * Events are stored individually keyed by index so that appending new events
+ * from the server is O(k) for k new events, not O(n+k).
+ *
  * Storage layout (per public key):
- *   ot:identity                → base64-encoded 64-byte Ed25519 secret key
- *   ot:{pubKeyHex}:events      → JSON array of cached ServerEvent objects
- *   ot:{pubKeyHex}:lastSeq     → highest seq number we've fetched from server
- *   ot:{pubKeyHex}:lastSyncAt  → unix timestamp of last successful sync
+ *   ot:identity                    → base64-encoded 64-byte Ed25519 secret key
+ *   ot:{pubKeyHex}:eventCount      → number of cached events
+ *   ot:{pubKeyHex}:event:{index}   → JSON of a single ServerEvent
+ *   ot:{pubKeyHex}:lastSeq         → highest seq number we've fetched from server
+ *   ot:{pubKeyHex}:lastSyncAt      → unix timestamp of last successful sync
  *
  * On sync, we only request events with seq > lastSeq, then append them
- * to the cached array. This means a fresh device downloads everything once,
+ * to the cache. This means a fresh device downloads everything once,
  * and subsequent syncs are incremental.
  */
 
@@ -21,7 +25,16 @@ import type { ServerEvent } from './api';
 
 const PREFIX = 'ot';
 
-function eventsKey(publicKeyHex: string): string {
+function eventCountKey(publicKeyHex: string): string {
+  return `${PREFIX}:${publicKeyHex}:eventCount`;
+}
+
+function eventItemKey(publicKeyHex: string, index: number): string {
+  return `${PREFIX}:${publicKeyHex}:event:${index}`;
+}
+
+/** Old single-array key (for migration) */
+function oldEventsKey(publicKeyHex: string): string {
   return `${PREFIX}:${publicKeyHex}:events`;
 }
 
@@ -75,19 +88,52 @@ export class EventCache {
 
   // ── Event cache ───────────────────────────────────────────────────
 
+  /** Migrate from old single-array format to per-event keys if needed. */
+  private migrateIfNeeded(publicKeyHex: string): void {
+    const oldKey = oldEventsKey(publicKeyHex);
+    const old = this.store.getItem(oldKey);
+    if (!old) return;
+    try {
+      const events = JSON.parse(old) as ServerEvent[];
+      for (let i = 0; i < events.length; i++) {
+        this.store.setItem(eventItemKey(publicKeyHex, i), JSON.stringify(events[i]));
+      }
+      this.store.setItem(eventCountKey(publicKeyHex), String(events.length));
+    } catch {
+      this.store.setItem(eventCountKey(publicKeyHex), '0');
+    }
+    this.store.removeItem(oldKey);
+  }
+
+  /** Get the number of cached events for a public key */
+  private getEventCount(publicKeyHex: string): number {
+    this.migrateIfNeeded(publicKeyHex);
+    const raw = this.store.getItem(eventCountKey(publicKeyHex));
+    if (!raw) return 0;
+    const n = parseInt(raw, 10);
+    return isNaN(n) ? 0 : n;
+  }
+
   /** Get all cached events for a public key, ordered by seq */
   getCachedEvents(publicKeyHex: string): ServerEvent[] {
-    const raw = this.store.getItem(eventsKey(publicKeyHex));
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw) as ServerEvent[];
-    } catch {
-      return [];
+    const count = this.getEventCount(publicKeyHex);
+    const events: ServerEvent[] = [];
+    for (let i = 0; i < count; i++) {
+      const raw = this.store.getItem(eventItemKey(publicKeyHex, i));
+      if (raw) {
+        try {
+          events.push(JSON.parse(raw));
+        } catch {
+          // skip corrupt entry
+        }
+      }
     }
+    return events;
   }
 
   /** Get the highest seq number we've cached (0 if nothing cached) */
   getLastSeq(publicKeyHex: string): number {
+    this.migrateIfNeeded(publicKeyHex);
     const raw = this.store.getItem(lastSeqKey(publicKeyHex));
     if (!raw) return 0;
     const parsed = parseInt(raw, 10);
@@ -105,21 +151,24 @@ export class EventCache {
   /**
    * Append newly fetched events to the cache and update the high-water mark.
    * Events must be in ascending seq order and have seq > current lastSeq.
+   * Only writes the new events — O(k) for k new events, not O(n+k).
    */
   appendEvents(publicKeyHex: string, newEvents: ServerEvent[]): void {
     if (newEvents.length === 0) return;
 
-    const existing = this.getCachedEvents(publicKeyHex);
     const currentLastSeq = this.getLastSeq(publicKeyHex);
 
     // Filter out any events we already have (defensive)
     const fresh = newEvents.filter((e) => e.seq > currentLastSeq);
     if (fresh.length === 0) return;
 
-    const merged = [...existing, ...fresh];
+    const count = this.getEventCount(publicKeyHex);
+    for (let i = 0; i < fresh.length; i++) {
+      this.store.setItem(eventItemKey(publicKeyHex, count + i), JSON.stringify(fresh[i]));
+    }
     const newLastSeq = fresh[fresh.length - 1].seq;
 
-    this.store.setItem(eventsKey(publicKeyHex), JSON.stringify(merged));
+    this.store.setItem(eventCountKey(publicKeyHex), String(count + fresh.length));
     this.store.setItem(lastSeqKey(publicKeyHex), String(newLastSeq));
     this.store.setItem(
       lastSyncAtKey(publicKeyHex),
@@ -138,7 +187,11 @@ export class EventCache {
 
   /** Clear all cached data for a public key */
   clearCache(publicKeyHex: string): void {
-    this.store.removeItem(eventsKey(publicKeyHex));
+    const count = this.getEventCount(publicKeyHex);
+    for (let i = 0; i < count; i++) {
+      this.store.removeItem(eventItemKey(publicKeyHex, i));
+    }
+    this.store.removeItem(eventCountKey(publicKeyHex));
     this.store.removeItem(lastSeqKey(publicKeyHex));
     this.store.removeItem(lastSyncAtKey(publicKeyHex));
   }
@@ -146,7 +199,6 @@ export class EventCache {
   /** Clear everything — identity + all cached events */
   clearAll(): void {
     this.clearIdentity();
-    // We can't easily enumerate localStorage keys with the KVStore interface,
-    // so callers should clear per-key caches explicitly if needed.
+    // Callers should clear per-key caches explicitly using clearCache().
   }
 }

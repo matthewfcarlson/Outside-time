@@ -31,28 +31,79 @@ export function roundUpToMinute(minutes: number): number {
 }
 
 // ─── Local event storage ───────────────────────────────────────────────
+//
+// Events are stored individually keyed by index so that appending is O(1)
+// instead of deserializing/re-serializing the entire array on every write.
+//
+//   ot:local:eventCount      → number of stored events
+//   ot:local:event:{index}   → JSON of a single OutsideEvent
+//   ot:local:activeTimer     → currently running timer (unchanged)
+//
 
-const LOCAL_EVENTS_KEY = 'ot:local:events';
+const LOCAL_EVENT_COUNT_KEY = 'ot:local:eventCount';
+const LOCAL_EVENT_PREFIX = 'ot:local:event:';
+const OLD_LOCAL_EVENTS_KEY = 'ot:local:events';
 const ACTIVE_TIMER_KEY = 'ot:local:activeTimer';
 
-export function loadEvents(): OutsideEvent[] {
-  const raw = localStorage.getItem(LOCAL_EVENTS_KEY);
-  if (!raw) return [];
+/** Migrate from the old single-array format to per-event keys (runs once). */
+function migrateLocalEvents(): void {
+  const old = localStorage.getItem(OLD_LOCAL_EVENTS_KEY);
+  if (!old) return;
   try {
-    return JSON.parse(raw) as OutsideEvent[];
+    const events = JSON.parse(old) as OutsideEvent[];
+    for (let i = 0; i < events.length; i++) {
+      localStorage.setItem(`${LOCAL_EVENT_PREFIX}${i}`, JSON.stringify(events[i]));
+    }
+    localStorage.setItem(LOCAL_EVENT_COUNT_KEY, String(events.length));
   } catch {
-    return [];
+    // Corrupt data — start fresh
+    localStorage.setItem(LOCAL_EVENT_COUNT_KEY, '0');
   }
+  localStorage.removeItem(OLD_LOCAL_EVENTS_KEY);
+}
+
+migrateLocalEvents();
+
+function getLocalEventCount(): number {
+  const raw = localStorage.getItem(LOCAL_EVENT_COUNT_KEY);
+  if (!raw) return 0;
+  const n = parseInt(raw, 10);
+  return isNaN(n) ? 0 : n;
+}
+
+export function loadEvents(): OutsideEvent[] {
+  const count = getLocalEventCount();
+  const events: OutsideEvent[] = [];
+  for (let i = 0; i < count; i++) {
+    const raw = localStorage.getItem(`${LOCAL_EVENT_PREFIX}${i}`);
+    if (raw) {
+      try {
+        events.push(JSON.parse(raw));
+      } catch {
+        // skip corrupt entry
+      }
+    }
+  }
+  return events;
 }
 
 export function saveEvents(events: OutsideEvent[]): void {
-  localStorage.setItem(LOCAL_EVENTS_KEY, JSON.stringify(events));
+  const oldCount = getLocalEventCount();
+  // Clear old entries
+  for (let i = 0; i < oldCount; i++) {
+    localStorage.removeItem(`${LOCAL_EVENT_PREFIX}${i}`);
+  }
+  // Write new entries
+  for (let i = 0; i < events.length; i++) {
+    localStorage.setItem(`${LOCAL_EVENT_PREFIX}${i}`, JSON.stringify(events[i]));
+  }
+  localStorage.setItem(LOCAL_EVENT_COUNT_KEY, String(events.length));
 }
 
 export function appendEvent(event: OutsideEvent): void {
-  const events = loadEvents();
-  events.push(event);
-  saveEvents(events);
+  const count = getLocalEventCount();
+  localStorage.setItem(`${LOCAL_EVENT_PREFIX}${count}`, JSON.stringify(event));
+  localStorage.setItem(LOCAL_EVENT_COUNT_KEY, String(count + 1));
 }
 
 export function loadActiveTimer(): TimerStartEvent | null {
