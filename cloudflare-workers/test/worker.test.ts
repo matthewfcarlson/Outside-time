@@ -55,9 +55,10 @@ async function appendEvent(
   return workerFetch(`/api/log/${publicKeyHex}`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       'X-Signature': signature,
     },
-    body: ct,
+    body: JSON.stringify({ ciphertext: ct }),
   });
 }
 
@@ -170,8 +171,8 @@ describe('POST /api/log/:publicKey', () => {
     const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, '');
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': sig },
-      body: '',
+      headers: { 'Content-Type': 'application/json', 'X-Signature': sig },
+      body: JSON.stringify({ ciphertext: '' }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -184,8 +185,8 @@ describe('POST /api/log/:publicKey', () => {
     const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, bigPayload);
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': sig },
-      body: bigPayload,
+      headers: { 'Content-Type': 'application/json', 'X-Signature': sig },
+      body: JSON.stringify({ ciphertext: bigPayload }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -204,8 +205,8 @@ describe('POST /api/log/:publicKey', () => {
     );
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': badSig },
-      body: ct,
+      headers: { 'Content-Type': 'application/json', 'X-Signature': badSig },
+      body: JSON.stringify({ ciphertext: ct }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -220,8 +221,8 @@ describe('POST /api/log/:publicKey', () => {
     const tamperedCt = fakeCiphertext();
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': sig },
-      body: tamperedCt,
+      headers: { 'Content-Type': 'application/json', 'X-Signature': sig },
+      body: JSON.stringify({ ciphertext: tamperedCt }),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
@@ -529,7 +530,7 @@ describe('Rate limiting', () => {
     const res = await rateLimitedFetch(
       `/api/log/${publicKeyHex}`,
       { WRITE_LIMITER: mockLimiter(false) },
-      { method: 'POST', headers: { 'X-Signature': sig }, body: ct }
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Signature': sig }, body: JSON.stringify({ ciphertext: ct }) }
     );
     expect(res.status).toBe(429);
     const body = (await res.json()) as { error: string };
@@ -564,7 +565,7 @@ describe('Rate limiting', () => {
     const res = await rateLimitedFetch(
       `/api/log/${publicKeyHex}`,
       { WRITE_LIMITER: mockLimiter(true) },
-      { method: 'POST', headers: { 'X-Signature': sig }, body: ct }
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Signature': sig }, body: JSON.stringify({ ciphertext: ct }) }
     );
     expect(res.status).toBe(201);
   });
@@ -596,7 +597,7 @@ describe('Rate limiting', () => {
     const res = await rateLimitedFetch(
       `/api/log/${publicKeyHex}`,
       { IP_LIMITER: mockLimiter(false), WRITE_LIMITER: mockLimiter(true) },
-      { method: 'POST', headers: { 'X-Signature': sig }, body: ct }
+      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Signature': sig }, body: JSON.stringify({ ciphertext: ct }) }
     );
     expect(res.status).toBe(429);
   });
