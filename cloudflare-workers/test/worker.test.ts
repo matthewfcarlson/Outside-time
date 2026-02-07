@@ -6,6 +6,7 @@ import {
 } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
 import worker from '../src/index';
+import type { Env, RateLimiter } from '../src/types';
 import {
   generateTestIdentity,
   signAppendRequest,
@@ -375,6 +376,32 @@ describe('GET /api/log/:publicKey', () => {
     expect(res.status).toBe(200);
   });
 
+  it('defaults limit to DEFAULT_LIMIT when given non-numeric value', async () => {
+    const { publicKeyHex } = generateTestIdentity();
+    const res = await workerFetch(`/api/log/${publicKeyHex}?limit=abc`);
+    expect(res.status).toBe(200);
+  });
+
+  it('defaults after to 0 when given non-numeric value', async () => {
+    const { keyPair, publicKeyHex } = generateTestIdentity();
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+
+    const res = await workerFetch(`/api/log/${publicKeyHex}?after=xyz`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { events: unknown[] };
+    expect(body.events).toHaveLength(1);
+  });
+
+  it('defaults after to 0 when given negative value', async () => {
+    const { keyPair, publicKeyHex } = generateTestIdentity();
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+
+    const res = await workerFetch(`/api/log/${publicKeyHex}?after=-5`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { events: unknown[] };
+    expect(body.events).toHaveLength(1);
+  });
+
   it('does not return events from other users', async () => {
     const user1 = generateTestIdentity();
     const user2 = generateTestIdentity();
@@ -470,5 +497,86 @@ describe('HEAD /api/log/:publicKey', () => {
     });
     expect(res.headers.get('X-Event-Count')).toBe('1');
     expect(res.headers.get('X-Latest-Seq')).toBe('1');
+  });
+});
+
+// ─── Rate Limiting ────────────────────────────────────────────────────
+
+describe('Rate limiting', () => {
+  function mockLimiter(success: boolean): RateLimiter {
+    return { limit: async () => ({ success }) };
+  }
+
+  async function rateLimitedFetch(
+    path: string,
+    envOverrides: Partial<Env>,
+    init?: RequestInit
+  ): Promise<Response> {
+    const request = new Request(`http://localhost${path}`, init);
+    const ctx = createExecutionContext();
+    const response = await worker.fetch(
+      request,
+      { ...env, ...envOverrides } as Env,
+      ctx
+    );
+    await waitOnExecutionContext(ctx);
+    return response;
+  }
+
+  it('returns 429 when write rate limit is exceeded', async () => {
+    const { keyPair, publicKeyHex } = generateTestIdentity();
+    const ct = fakeCiphertext();
+    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, ct);
+
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { WRITE_LIMITER: mockLimiter(false) },
+      { method: 'POST', headers: { 'X-Signature': sig }, body: ct }
+    );
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Rate limit');
+    expect(res.headers.get('Retry-After')).toBe('60');
+  });
+
+  it('returns 429 when read rate limit is exceeded on GET', async () => {
+    const { publicKeyHex } = generateTestIdentity();
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { READ_LIMITER: mockLimiter(false) }
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it('returns 429 when read rate limit is exceeded on HEAD', async () => {
+    const { publicKeyHex } = generateTestIdentity();
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { READ_LIMITER: mockLimiter(false) },
+      { method: 'HEAD' }
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it('allows requests when rate limit is not exceeded', async () => {
+    const { keyPair, publicKeyHex } = generateTestIdentity();
+    const ct = fakeCiphertext();
+    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, ct);
+
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { WRITE_LIMITER: mockLimiter(true) },
+      { method: 'POST', headers: { 'X-Signature': sig }, body: ct }
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it('includes CORS headers on 429 response', async () => {
+    const { publicKeyHex } = generateTestIdentity();
+    const res = await rateLimitedFetch(
+      `/api/log/${publicKeyHex}`,
+      { READ_LIMITER: mockLimiter(false) }
+    );
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 });

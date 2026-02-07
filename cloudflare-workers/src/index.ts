@@ -3,6 +3,7 @@ import { handleAppend } from './handlers/append';
 import { handleRead } from './handlers/read';
 import { handleHead } from './handlers/head';
 import { handleOptions, corsHeaders } from './middleware/cors';
+import { checkRateLimit } from './middleware/rateLimit';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -20,12 +21,21 @@ export default {
       const publicKey = logMatch[1];
 
       switch (method) {
-        case 'POST':
+        case 'POST': {
+          const limited = await checkRateLimit(env.WRITE_LIMITER, publicKey);
+          if (limited) return limited;
           return handleAppend(request, env, publicKey);
-        case 'GET':
+        }
+        case 'GET': {
+          const limited = await checkRateLimit(env.READ_LIMITER, publicKey);
+          if (limited) return limited;
           return handleRead(request, env, publicKey);
-        case 'HEAD':
+        }
+        case 'HEAD': {
+          const limited = await checkRateLimit(env.READ_LIMITER, publicKey);
+          if (limited) return limited;
           return handleHead(env, publicKey);
+        }
       }
     }
 

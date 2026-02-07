@@ -25,11 +25,13 @@ export async function handleRead(
   }
 
   const url = new URL(request.url);
-  const after = parseInt(url.searchParams.get('after') ?? '0', 10);
+  let after = parseInt(url.searchParams.get('after') ?? '0', 10);
+  if (isNaN(after) || after < 0) after = 0;
   let limit = parseInt(
     url.searchParams.get('limit') ?? String(DEFAULT_LIMIT),
     10
   );
+  if (isNaN(limit)) limit = DEFAULT_LIMIT;
   limit = Math.min(Math.max(1, limit), MAX_LIMIT);
 
   // Fetch one extra to determine if there are more
