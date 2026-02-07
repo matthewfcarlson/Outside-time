@@ -4,7 +4,7 @@
   import SessionLog from './lib/components/SessionLog.svelte';
   import IdentityQR from './lib/components/IdentityQR.svelte';
   import SyncStatus from './lib/components/SyncStatus.svelte';
-  import { loadEvents, reconstructSessions, type Session } from './lib/session';
+  import { loadEvents, saveEvents, reconstructSessions, type Session } from './lib/session';
   import { ApiClient } from './lib/api';
   import { SyncEngine, type DecryptedServerEvent } from './lib/sync';
   import { EventCache } from './lib/storage';
@@ -90,9 +90,21 @@
     if (!API_BASE) return;
     try {
       syncState = 'syncing';
-      await syncEngine.pull();
+      const decrypted = await syncEngine.pull();
+
+      // Merge server events into local storage (deduplicate by id)
+      const local = loadEvents();
+      const localIds = new Set(local.map((e) => e.id));
+      const newEvents = decrypted
+        .map((d) => d.event)
+        .filter((e) => !localIds.has(e.id));
+      if (newEvents.length > 0) {
+        saveEvents([...local, ...newEvents]);
+      }
+
       lastSyncAt = Math.floor(Date.now() / 1000);
       syncState = 'idle';
+      refresh();
     } catch (e) {
       console.warn('Pull failed:', e);
       syncState = navigator.onLine ? 'error' : 'offline';
