@@ -11,6 +11,9 @@
     markEventSynced,
     clearPending,
     reconstructSessions,
+    findActiveTimerStart,
+    loadActiveTimer,
+    saveActiveTimer,
     type Session,
   } from './lib/session';
   import { ApiClient } from './lib/api';
@@ -76,6 +79,7 @@
   let showSettings = $state(false);
   let debugMode = $state(localStorage.getItem('ot:debugMode') === 'true');
   let seqMap = $state(new Map<string, number>());
+  let pullCount = $state(0);
 
   function refresh() {
     events = loadEvents();
@@ -127,6 +131,16 @@
       lastSyncAt = Math.floor(Date.now() / 1000);
       syncState = 'idle';
       refresh();
+
+      // Sync active timer state from event log (cross-device support)
+      const activeFromEvents = findActiveTimerStart(events);
+      const localActive = loadActiveTimer();
+      if (activeFromEvents && !localActive) {
+        saveActiveTimer(activeFromEvents);
+      } else if (!activeFromEvents && localActive) {
+        saveActiveTimer(null);
+      }
+      pullCount++;
     } catch (e) {
       console.warn('Pull failed:', e);
       syncState = navigator.onLine ? 'error' : 'offline';
@@ -190,7 +204,7 @@
     </section>
   {/if}
 
-  <Timer onchange={refresh} onpush={pushEvent} />
+  <Timer onchange={refresh} onpush={pushEvent} {pullCount} />
   <Summary {sessions} />
   <SessionLog {sessions} {events} {debugMode} {seqMap} onchange={refresh} onpush={pushEvent} />
 </main>
