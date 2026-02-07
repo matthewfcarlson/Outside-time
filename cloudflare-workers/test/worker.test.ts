@@ -380,10 +380,11 @@ describe('GET /api/log/:publicKey', () => {
     const user2 = generateTestIdentity();
 
     await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey);
+    await appendEvent(user2.publicKeyHex, user2.keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${user2.publicKeyHex}`);
-    const body = (await res.json()) as { events: unknown[] };
-    expect(body.events).toEqual([]);
+    const body = (await res.json()) as { events: { ciphertext: string }[] };
+    expect(body.events).toHaveLength(1);
   });
 
   it('includes CORS headers', async () => {
@@ -462,11 +463,12 @@ describe('HEAD /api/log/:publicKey', () => {
 
     await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey);
     await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey);
+    await appendEvent(user2.publicKeyHex, user2.keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${user2.publicKeyHex}`, {
       method: 'HEAD',
     });
-    expect(res.headers.get('X-Event-Count')).toBe('0');
-    expect(res.headers.get('X-Latest-Seq')).toBe('0');
+    expect(res.headers.get('X-Event-Count')).toBe('1');
+    expect(res.headers.get('X-Latest-Seq')).toBe('1');
   });
 });
