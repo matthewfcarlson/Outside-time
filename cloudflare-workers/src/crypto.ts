@@ -4,12 +4,12 @@ import { decodeBase64 } from 'tweetnacl-util';
 /**
  * Verify an Ed25519 signature.
  *
- * The signed message is: publicKey (hex) || seq (string) || ciphertext (base64)
- * This ensures a signature is bound to a specific key, sequence number, and payload.
+ * The signed message is: publicKey (hex) || ":" || ciphertext (base64)
+ * This ensures a signature is bound to a specific key and payload.
+ * Sequence numbers are assigned server-side and not included in the signature.
  */
 export function verifySignature(
   publicKeyHex: string,
-  seq: number,
   ciphertextBase64: string,
   signatureBase64: string
 ): boolean {
@@ -18,7 +18,7 @@ export function verifySignature(
     if (publicKey.length !== 32) return false;
 
     const message = new TextEncoder().encode(
-      `${publicKeyHex}:${seq}:${ciphertextBase64}`
+      `${publicKeyHex}:${ciphertextBase64}`
     );
     const signature = decodeBase64(signatureBase64);
     if (signature.length !== 64) return false;

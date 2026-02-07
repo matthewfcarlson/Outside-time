@@ -12,16 +12,15 @@ export function generateTestIdentity() {
 
 /**
  * Create a valid Ed25519 signature for an append request.
- * Signs: publicKeyHex + ":" + seq + ":" + ciphertextBase64
+ * Signs: publicKeyHex + ":" + ciphertextBase64
  */
 export function signAppendRequest(
   secretKey: Uint8Array,
   publicKeyHex: string,
-  seq: number,
   ciphertextBase64: string
 ): string {
   const message = new TextEncoder().encode(
-    `${publicKeyHex}:${seq}:${ciphertextBase64}`
+    `${publicKeyHex}:${ciphertextBase64}`
   );
   const signature = nacl.sign.detached(message, secretKey);
   return encodeBase64(signature);

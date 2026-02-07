@@ -47,16 +47,14 @@ async function workerFetch(
 async function appendEvent(
   publicKeyHex: string,
   secretKey: Uint8Array,
-  seq: number,
   ciphertext?: string
 ): Promise<Response> {
   const ct = ciphertext ?? fakeCiphertext();
-  const signature = signAppendRequest(secretKey, publicKeyHex, seq, ct);
+  const signature = signAppendRequest(secretKey, publicKeyHex, ct);
   return workerFetch(`/api/log/${publicKeyHex}`, {
     method: 'POST',
     headers: {
       'X-Signature': signature,
-      'X-Sequence': String(seq),
     },
     body: ct,
   });
@@ -117,9 +115,6 @@ describe('OPTIONS (CORS preflight)', () => {
     expect(res.headers.get('Access-Control-Allow-Headers')).toContain(
       'X-Signature'
     );
-    expect(res.headers.get('Access-Control-Allow-Headers')).toContain(
-      'X-Sequence'
-    );
     expect(res.headers.get('Access-Control-Expose-Headers')).toContain(
       'X-Event-Count'
     );
@@ -134,96 +129,49 @@ describe('OPTIONS (CORS preflight)', () => {
 describe('POST /api/log/:publicKey', () => {
   it('appends an event with valid signature and returns 201', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    const res = await appendEvent(publicKeyHex, keyPair.secretKey, 1);
+    const res = await appendEvent(publicKeyHex, keyPair.secretKey);
     expect(res.status).toBe(201);
     const body = (await res.json()) as { seq: number; created_at: number };
     expect(body.seq).toBe(1);
     expect(body.created_at).toBeTypeOf('number');
   });
 
-  it('appends multiple sequential events', async () => {
+  it('auto-increments sequence numbers', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
 
-    const res1 = await appendEvent(publicKeyHex, keyPair.secretKey, 1);
+    const res1 = await appendEvent(publicKeyHex, keyPair.secretKey);
     expect(res1.status).toBe(201);
+    const body1 = (await res1.json()) as { seq: number };
+    expect(body1.seq).toBe(1);
 
-    const res2 = await appendEvent(publicKeyHex, keyPair.secretKey, 2);
+    const res2 = await appendEvent(publicKeyHex, keyPair.secretKey);
     expect(res2.status).toBe(201);
+    const body2 = (await res2.json()) as { seq: number };
+    expect(body2.seq).toBe(2);
 
-    const res3 = await appendEvent(publicKeyHex, keyPair.secretKey, 3);
+    const res3 = await appendEvent(publicKeyHex, keyPair.secretKey);
     expect(res3.status).toBe(201);
+    const body3 = (await res3.json()) as { seq: number };
+    expect(body3.seq).toBe(3);
   });
 
   it('rejects missing X-Signature header', async () => {
     const { publicKeyHex } = generateTestIdentity();
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Sequence': '1' },
       body: fakeCiphertext(),
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('Missing required headers');
-  });
-
-  it('rejects missing X-Sequence header', async () => {
-    const { publicKeyHex } = generateTestIdentity();
-    const res = await workerFetch(`/api/log/${publicKeyHex}`, {
-      method: 'POST',
-      headers: { 'X-Signature': 'abc123' },
-      body: fakeCiphertext(),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('Missing required headers');
-  });
-
-  it('rejects non-integer sequence number', async () => {
-    const { keyPair, publicKeyHex } = generateTestIdentity();
-    const ct = fakeCiphertext();
-    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, 1, ct);
-    const res = await workerFetch(`/api/log/${publicKeyHex}`, {
-      method: 'POST',
-      headers: { 'X-Signature': sig, 'X-Sequence': 'abc' },
-      body: ct,
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('positive integer');
-  });
-
-  it('rejects sequence number 0', async () => {
-    const { keyPair, publicKeyHex } = generateTestIdentity();
-    const ct = fakeCiphertext();
-    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, 0, ct);
-    const res = await workerFetch(`/api/log/${publicKeyHex}`, {
-      method: 'POST',
-      headers: { 'X-Signature': sig, 'X-Sequence': '0' },
-      body: ct,
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('positive integer');
-  });
-
-  it('rejects negative sequence number', async () => {
-    const { keyPair, publicKeyHex } = generateTestIdentity();
-    const ct = fakeCiphertext();
-    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, -1, ct);
-    const res = await workerFetch(`/api/log/${publicKeyHex}`, {
-      method: 'POST',
-      headers: { 'X-Signature': sig, 'X-Sequence': '-1' },
-      body: ct,
-    });
-    expect(res.status).toBe(400);
+    expect(body.error).toContain('X-Signature');
   });
 
   it('rejects empty body', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, 1, '');
+    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, '');
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': sig, 'X-Sequence': '1' },
+      headers: { 'X-Signature': sig },
       body: '',
     });
     expect(res.status).toBe(400);
@@ -234,15 +182,10 @@ describe('POST /api/log/:publicKey', () => {
   it('rejects oversized body (>10KB)', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
     const bigPayload = 'A'.repeat(10241);
-    const sig = signAppendRequest(
-      keyPair.secretKey,
-      publicKeyHex,
-      1,
-      bigPayload
-    );
+    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, bigPayload);
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': sig, 'X-Sequence': '1' },
+      headers: { 'X-Signature': sig },
       body: bigPayload,
     });
     expect(res.status).toBe(400);
@@ -250,7 +193,7 @@ describe('POST /api/log/:publicKey', () => {
     expect(body.error).toContain('too large');
   });
 
-  it('rejects invalid signature', async () => {
+  it('rejects invalid signature (wrong key)', async () => {
     const { publicKeyHex } = generateTestIdentity();
     // Use a different key to sign — should fail verification
     const other = generateTestIdentity();
@@ -258,12 +201,11 @@ describe('POST /api/log/:publicKey', () => {
     const badSig = signAppendRequest(
       other.keyPair.secretKey,
       publicKeyHex,
-      1,
       ct
     );
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'POST',
-      headers: { 'X-Signature': badSig, 'X-Sequence': '1' },
+      headers: { 'X-Signature': badSig },
       body: ct,
     });
     expect(res.status).toBe(400);
@@ -271,37 +213,25 @@ describe('POST /api/log/:publicKey', () => {
     expect(body.error).toContain('Invalid signature');
   });
 
-  it('rejects duplicate sequence number with 409', async () => {
+  it('rejects tampered body (signature mismatch)', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-
-    // First append should succeed
-    const res1 = await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    expect(res1.status).toBe(201);
-
-    // Same seq should conflict
-    const res2 = await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    expect(res2.status).toBe(409);
-    const body = (await res2.json()) as { error: string };
-    expect(body.error).toContain('already exists');
-  });
-
-  it('rejects sequence gaps', async () => {
-    const { keyPair, publicKeyHex } = generateTestIdentity();
-
-    // Append seq 1
-    const res1 = await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    expect(res1.status).toBe(201);
-
-    // Skip to seq 3 — should fail
-    const res3 = await appendEvent(publicKeyHex, keyPair.secretKey, 3);
-    expect(res3.status).toBe(400);
-    const body = (await res3.json()) as { error: string };
-    expect(body.error).toContain('Sequence gap');
+    const ct = fakeCiphertext();
+    const sig = signAppendRequest(keyPair.secretKey, publicKeyHex, ct);
+    // Send a different body than what was signed
+    const tamperedCt = fakeCiphertext();
+    const res = await workerFetch(`/api/log/${publicKeyHex}`, {
+      method: 'POST',
+      headers: { 'X-Signature': sig },
+      body: tamperedCt,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Invalid signature');
   });
 
   it('includes CORS headers on success', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    const res = await appendEvent(publicKeyHex, keyPair.secretKey, 1);
+    const res = await appendEvent(publicKeyHex, keyPair.secretKey);
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 
@@ -314,23 +244,25 @@ describe('POST /api/log/:publicKey', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 
-  it('different users can use the same sequence numbers', async () => {
+  it('different users get independent sequence numbers', async () => {
     const user1 = generateTestIdentity();
     const user2 = generateTestIdentity();
 
     const res1 = await appendEvent(
       user1.publicKeyHex,
-      user1.keyPair.secretKey,
-      1
+      user1.keyPair.secretKey
     );
     expect(res1.status).toBe(201);
+    const body1 = (await res1.json()) as { seq: number };
+    expect(body1.seq).toBe(1);
 
     const res2 = await appendEvent(
       user2.publicKeyHex,
-      user2.keyPair.secretKey,
-      1
+      user2.keyPair.secretKey
     );
     expect(res2.status).toBe(201);
+    const body2 = (await res2.json()) as { seq: number };
+    expect(body2.seq).toBe(1);
   });
 });
 
@@ -351,8 +283,8 @@ describe('GET /api/log/:publicKey', () => {
     const ct1 = fakeCiphertext();
     const ct2 = fakeCiphertext();
 
-    await appendEvent(publicKeyHex, keyPair.secretKey, 1, ct1);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 2, ct2);
+    await appendEvent(publicKeyHex, keyPair.secretKey, ct1);
+    await appendEvent(publicKeyHex, keyPair.secretKey, ct2);
 
     const res = await workerFetch(`/api/log/${publicKeyHex}`);
     expect(res.status).toBe(200);
@@ -370,9 +302,9 @@ describe('GET /api/log/:publicKey', () => {
 
   it('supports ?after= parameter for pagination', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 2);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 3);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${publicKeyHex}?after=1`);
     const body = (await res.json()) as {
@@ -386,9 +318,9 @@ describe('GET /api/log/:publicKey', () => {
 
   it('supports ?limit= parameter', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 2);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 3);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${publicKeyHex}?limit=2`);
     const body = (await res.json()) as {
@@ -401,8 +333,8 @@ describe('GET /api/log/:publicKey', () => {
 
   it('has_more is false when all events fit in limit', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 2);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${publicKeyHex}?limit=10`);
     const body = (await res.json()) as {
@@ -415,8 +347,8 @@ describe('GET /api/log/:publicKey', () => {
 
   it('combines after and limit parameters', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    for (let i = 1; i <= 5; i++) {
-      await appendEvent(publicKeyHex, keyPair.secretKey, i);
+    for (let i = 0; i < 5; i++) {
+      await appendEvent(publicKeyHex, keyPair.secretKey);
     }
 
     const res = await workerFetch(`/api/log/${publicKeyHex}?after=2&limit=2`);
@@ -447,7 +379,7 @@ describe('GET /api/log/:publicKey', () => {
     const user1 = generateTestIdentity();
     const user2 = generateTestIdentity();
 
-    await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey, 1);
+    await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${user2.publicKeyHex}`);
     const body = (await res.json()) as { events: unknown[] };
@@ -462,7 +394,7 @@ describe('GET /api/log/:publicKey', () => {
 
   it('returns each event with seq, ciphertext, and created_at fields', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    await appendEvent(publicKeyHex, keyPair.secretKey, 1);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${publicKeyHex}`);
     const body = (await res.json()) as {
@@ -492,9 +424,9 @@ describe('HEAD /api/log/:publicKey', () => {
 
   it('returns correct count and latest seq after appends', async () => {
     const { keyPair, publicKeyHex } = generateTestIdentity();
-    await appendEvent(publicKeyHex, keyPair.secretKey, 1);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 2);
-    await appendEvent(publicKeyHex, keyPair.secretKey, 3);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
+    await appendEvent(publicKeyHex, keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${publicKeyHex}`, {
       method: 'HEAD',
@@ -528,8 +460,8 @@ describe('HEAD /api/log/:publicKey', () => {
     const user1 = generateTestIdentity();
     const user2 = generateTestIdentity();
 
-    await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey, 1);
-    await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey, 2);
+    await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey);
+    await appendEvent(user1.publicKeyHex, user1.keyPair.secretKey);
 
     const res = await workerFetch(`/api/log/${user2.publicKeyHex}`, {
       method: 'HEAD',

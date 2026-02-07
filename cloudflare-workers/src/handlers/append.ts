@@ -7,6 +7,7 @@ import { corsHeaders } from '../middleware/cors';
  *
  * Append an encrypted event to a user's log.
  * Requires a valid Ed25519 signature in the X-Signature header.
+ * The server assigns the next sequence number automatically.
  */
 export async function handleAppend(
   request: Request,
@@ -23,19 +24,10 @@ export async function handleAppend(
 
   // Read required headers
   const signatureBase64 = request.headers.get('X-Signature');
-  const seqStr = request.headers.get('X-Sequence');
 
-  if (!signatureBase64 || !seqStr) {
+  if (!signatureBase64) {
     return jsonResponse<ErrorResponse>(
-      { error: 'Missing required headers: X-Signature, X-Sequence' },
-      400
-    );
-  }
-
-  const seq = parseInt(seqStr, 10);
-  if (!Number.isInteger(seq) || seq < 1) {
-    return jsonResponse<ErrorResponse>(
-      { error: 'X-Sequence must be a positive integer' },
+      { error: 'Missing required header: X-Signature' },
       400
     );
   }
@@ -58,43 +50,21 @@ export async function handleAppend(
   }
 
   // Verify Ed25519 signature
-  if (!verifySignature(publicKey, seq, ciphertextBase64, signatureBase64)) {
+  if (!verifySignature(publicKey, ciphertextBase64, signatureBase64)) {
     return jsonResponse<ErrorResponse>(
       { error: 'Invalid signature' },
       400
     );
   }
 
-  // Check for sequence conflict
-  const existing = await env.DB.prepare(
-    'SELECT seq FROM events WHERE public_key = ? AND seq = ?'
-  )
-    .bind(publicKey, seq)
-    .first();
-
-  if (existing) {
-    return jsonResponse<ErrorResponse>(
-      { error: `Sequence number ${seq} already exists` },
-      409
-    );
-  }
-
-  // Verify sequence is contiguous (next expected seq)
+  // Determine next sequence number
   const latest = await env.DB.prepare(
     'SELECT MAX(seq) as max_seq FROM events WHERE public_key = ?'
   )
     .bind(publicKey)
     .first<{ max_seq: number | null }>();
 
-  const expectedSeq = (latest?.max_seq ?? 0) + 1;
-  if (seq !== expectedSeq) {
-    return jsonResponse<ErrorResponse>(
-      {
-        error: `Sequence gap: expected ${expectedSeq}, got ${seq}`,
-      },
-      400
-    );
-  }
+  const seq = (latest?.max_seq ?? 0) + 1;
 
   // Insert the event
   const now = Math.floor(Date.now() / 1000);
