@@ -32,78 +32,173 @@ export function roundUpToMinute(minutes: number): number {
 
 // ─── Local event storage ───────────────────────────────────────────────
 //
-// Events are stored individually keyed by index so that appending is O(1)
-// instead of deserializing/re-serializing the entire array on every write.
+// Events are stored individually keyed by their UUID so that:
+//   - Appending is O(1) (no deserializing the whole log)
+//   - Any event can be looked up by ID
+//   - A lightweight pending queue tracks events awaiting upload
 //
-//   ot:local:eventCount      → number of stored events
-//   ot:local:event:{index}   → JSON of a single OutsideEvent
+// Storage layout:
+//   ot:local:event:{uuid}    → JSON of a single OutsideEvent
+//   ot:local:eventOrder      → JSON array of event UUIDs (preserves ordering)
+//   ot:local:pending         → JSON array of event UUIDs not yet synced
 //   ot:local:activeTimer     → currently running timer (unchanged)
 //
 
-const LOCAL_EVENT_COUNT_KEY = 'ot:local:eventCount';
 const LOCAL_EVENT_PREFIX = 'ot:local:event:';
-const OLD_LOCAL_EVENTS_KEY = 'ot:local:events';
+const LOCAL_EVENT_ORDER_KEY = 'ot:local:eventOrder';
+const LOCAL_PENDING_KEY = 'ot:local:pending';
 const ACTIVE_TIMER_KEY = 'ot:local:activeTimer';
 
-/** Migrate from the old single-array format to per-event keys (runs once). */
+// Legacy keys (for migration)
+const LEGACY_ARRAY_KEY = 'ot:local:events';
+const LEGACY_COUNT_KEY = 'ot:local:eventCount';
+
+/** One-time migration from older storage formats. */
 function migrateLocalEvents(): void {
-  const old = localStorage.getItem(OLD_LOCAL_EVENTS_KEY);
-  if (!old) return;
-  try {
-    const events = JSON.parse(old) as OutsideEvent[];
-    for (let i = 0; i < events.length; i++) {
-      localStorage.setItem(`${LOCAL_EVENT_PREFIX}${i}`, JSON.stringify(events[i]));
+  // Format A: original single JSON array
+  const oldArray = localStorage.getItem(LEGACY_ARRAY_KEY);
+  if (oldArray) {
+    try {
+      const events = JSON.parse(oldArray) as OutsideEvent[];
+      const order: string[] = [];
+      for (const event of events) {
+        localStorage.setItem(`${LOCAL_EVENT_PREFIX}${event.id}`, JSON.stringify(event));
+        order.push(event.id);
+      }
+      localStorage.setItem(LOCAL_EVENT_ORDER_KEY, JSON.stringify(order));
+    } catch {
+      localStorage.setItem(LOCAL_EVENT_ORDER_KEY, '[]');
     }
-    localStorage.setItem(LOCAL_EVENT_COUNT_KEY, String(events.length));
-  } catch {
-    // Corrupt data — start fresh
-    localStorage.setItem(LOCAL_EVENT_COUNT_KEY, '0');
+    localStorage.setItem(LOCAL_PENDING_KEY, '[]');
+    localStorage.removeItem(LEGACY_ARRAY_KEY);
+    return;
   }
-  localStorage.removeItem(OLD_LOCAL_EVENTS_KEY);
+
+  // Format B: per-index keys (ot:local:event:0, ot:local:event:1, …)
+  const countRaw = localStorage.getItem(LEGACY_COUNT_KEY);
+  if (countRaw) {
+    const count = parseInt(countRaw, 10) || 0;
+    const order: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const key = `${LOCAL_EVENT_PREFIX}${i}`;
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const event = JSON.parse(raw) as OutsideEvent;
+          localStorage.removeItem(key);
+          localStorage.setItem(`${LOCAL_EVENT_PREFIX}${event.id}`, JSON.stringify(event));
+          order.push(event.id);
+        } catch {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+    localStorage.setItem(LOCAL_EVENT_ORDER_KEY, JSON.stringify(order));
+    localStorage.setItem(LOCAL_PENDING_KEY, '[]');
+    localStorage.removeItem(LEGACY_COUNT_KEY);
+  }
 }
 
 migrateLocalEvents();
 
-function getLocalEventCount(): number {
-  const raw = localStorage.getItem(LOCAL_EVENT_COUNT_KEY);
-  if (!raw) return 0;
-  const n = parseInt(raw, 10);
-  return isNaN(n) ? 0 : n;
+// ─── Internal helpers ──────────────────────────────────────────────────
+
+function loadEventOrder(): string[] {
+  const raw = localStorage.getItem(LOCAL_EVENT_ORDER_KEY);
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch { return []; }
 }
 
+function saveEventOrder(ids: string[]): void {
+  localStorage.setItem(LOCAL_EVENT_ORDER_KEY, JSON.stringify(ids));
+}
+
+function loadPendingIds(): string[] {
+  const raw = localStorage.getItem(LOCAL_PENDING_KEY);
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch { return []; }
+}
+
+function savePendingIds(ids: string[]): void {
+  localStorage.setItem(LOCAL_PENDING_KEY, JSON.stringify(ids));
+}
+
+// ─── Public API ────────────────────────────────────────────────────────
+
+/** Load all events in log order. */
 export function loadEvents(): OutsideEvent[] {
-  const count = getLocalEventCount();
+  const order = loadEventOrder();
   const events: OutsideEvent[] = [];
-  for (let i = 0; i < count; i++) {
-    const raw = localStorage.getItem(`${LOCAL_EVENT_PREFIX}${i}`);
+  for (const id of order) {
+    const raw = localStorage.getItem(`${LOCAL_EVENT_PREFIX}${id}`);
     if (raw) {
-      try {
-        events.push(JSON.parse(raw));
-      } catch {
-        // skip corrupt entry
-      }
+      try { events.push(JSON.parse(raw)); } catch { /* skip corrupt */ }
     }
   }
   return events;
 }
 
+/** Full overwrite — clears existing events and writes the given list. */
 export function saveEvents(events: OutsideEvent[]): void {
-  const oldCount = getLocalEventCount();
-  // Clear old entries
-  for (let i = 0; i < oldCount; i++) {
-    localStorage.removeItem(`${LOCAL_EVENT_PREFIX}${i}`);
+  // Remove old event data
+  const oldOrder = loadEventOrder();
+  for (const id of oldOrder) {
+    localStorage.removeItem(`${LOCAL_EVENT_PREFIX}${id}`);
   }
-  // Write new entries
-  for (let i = 0; i < events.length; i++) {
-    localStorage.setItem(`${LOCAL_EVENT_PREFIX}${i}`, JSON.stringify(events[i]));
+  // Write new events
+  const order: string[] = [];
+  for (const event of events) {
+    localStorage.setItem(`${LOCAL_EVENT_PREFIX}${event.id}`, JSON.stringify(event));
+    order.push(event.id);
   }
-  localStorage.setItem(LOCAL_EVENT_COUNT_KEY, String(events.length));
+  saveEventOrder(order);
 }
 
+/** Append a locally-created event. Marks it as pending sync. */
 export function appendEvent(event: OutsideEvent): void {
-  const count = getLocalEventCount();
-  localStorage.setItem(`${LOCAL_EVENT_PREFIX}${count}`, JSON.stringify(event));
-  localStorage.setItem(LOCAL_EVENT_COUNT_KEY, String(count + 1));
+  localStorage.setItem(`${LOCAL_EVENT_PREFIX}${event.id}`, JSON.stringify(event));
+  const order = loadEventOrder();
+  order.push(event.id);
+  saveEventOrder(order);
+  // Mark as needing upload
+  const pending = loadPendingIds();
+  pending.push(event.id);
+  savePendingIds(pending);
+}
+
+/** Append events that came from the server (NOT marked as pending). */
+export function appendPulledEvents(events: OutsideEvent[]): void {
+  if (events.length === 0) return;
+  const order = loadEventOrder();
+  for (const event of events) {
+    localStorage.setItem(`${LOCAL_EVENT_PREFIX}${event.id}`, JSON.stringify(event));
+    order.push(event.id);
+  }
+  saveEventOrder(order);
+}
+
+/** Load only events that haven't been uploaded to the server yet. */
+export function loadPendingEvents(): OutsideEvent[] {
+  const pendingIds = loadPendingIds();
+  const events: OutsideEvent[] = [];
+  for (const id of pendingIds) {
+    const raw = localStorage.getItem(`${LOCAL_EVENT_PREFIX}${id}`);
+    if (raw) {
+      try { events.push(JSON.parse(raw)); } catch { /* skip */ }
+    }
+  }
+  return events;
+}
+
+/** Remove a single event from the pending queue (after successful push). */
+export function markEventSynced(eventId: string): void {
+  const pending = loadPendingIds();
+  savePendingIds(pending.filter((id) => id !== eventId));
+}
+
+/** Clear the entire pending queue (after a successful full sync). */
+export function clearPending(): void {
+  savePendingIds([]);
 }
 
 export function loadActiveTimer(): TimerStartEvent | null {

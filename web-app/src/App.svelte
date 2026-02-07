@@ -4,7 +4,15 @@
   import SessionLog from './lib/components/SessionLog.svelte';
   import IdentityQR from './lib/components/IdentityQR.svelte';
   import SyncStatus from './lib/components/SyncStatus.svelte';
-  import { loadEvents, appendEvent, reconstructSessions, type Session } from './lib/session';
+  import {
+    loadEvents,
+    appendPulledEvents,
+    loadPendingEvents,
+    markEventSynced,
+    clearPending,
+    reconstructSessions,
+    type Session,
+  } from './lib/session';
   import { ApiClient } from './lib/api';
   import { SyncEngine } from './lib/sync';
   import { EventCache } from './lib/storage';
@@ -84,6 +92,7 @@
     try {
       syncState = 'syncing';
       const result = await syncEngine.push(event);
+      markEventSynced(event.id);
       const updated = new Map(seqMap);
       updated.set(event.id, result.seq);
       seqMap = updated;
@@ -115,9 +124,7 @@
       const newEvents = decrypted
         .map((d) => d.event)
         .filter((e) => !localIds.has(e.id));
-      for (const event of newEvents) {
-        appendEvent(event);
-      }
+      appendPulledEvents(newEvents);
 
       lastSyncAt = Math.floor(Date.now() / 1000);
       syncState = 'idle';
@@ -134,15 +141,20 @@
     try {
       syncState = 'syncing';
 
-      // Push any local events that aren't on the server yet
-      const local = loadEvents();
-      const pushed = await syncEngine.pushUnsynced(local);
-      if (pushed > 0) {
-        console.log(`Pushed ${pushed} unsynced event(s) to server`);
+      // Push only pending (unsynced) events instead of scanning the full log
+      const pending = loadPendingEvents();
+      if (pending.length > 0) {
+        const pushed = await syncEngine.pushUnsynced(pending);
+        if (pushed > 0) {
+          console.log(`Pushed ${pushed} unsynced event(s) to server`);
+        }
       }
 
       // Then pull any new events from the server
       await pullEvents();
+
+      // After a successful full sync, all events are on the server
+      clearPending();
     } catch (e) {
       console.warn('Sync failed:', e);
       syncState = navigator.onLine ? 'error' : 'offline';
