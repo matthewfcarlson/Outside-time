@@ -54,13 +54,7 @@ export default {
       });
     }
 
-    // 404 for everything else
-    return new Response(JSON.stringify({ error: 'Not found' }), {
-      status: 404,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(),
-      },
-    });
+    // Serve static assets for everything else
+    return env.ASSETS.fetch(request);
   },
 };
