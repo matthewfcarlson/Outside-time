@@ -88,7 +88,6 @@
 
   // ─── Sync: push a single event to the server ──────────────────────
   async function pushEvent(event: OutsideEvent): Promise<void> {
-    if (!API_BASE) return; // No API configured, local-only mode
     try {
       syncState = 'syncing';
       const result = await syncEngine.push(event);
@@ -106,7 +105,6 @@
 
   // ─── Sync: pull events from server ─────────────────────────────────
   async function pullEvents(): Promise<void> {
-    if (!API_BASE) return;
     try {
       syncState = 'syncing';
       const decrypted = await syncEngine.pull();
@@ -137,7 +135,6 @@
 
   // ─── Sync: full sync (push unsynced, then pull) ──────────────────
   async function syncAll(): Promise<void> {
-    if (!API_BASE) return;
     try {
       syncState = 'syncing';
 
