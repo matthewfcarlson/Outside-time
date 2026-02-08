@@ -298,7 +298,9 @@
     </header>
 
     <Timer onchange={refresh} onpush={pushEvent} {pullCount} />
-    <Summary {sessions} />
+    {#if goals.length === 0}
+      <Summary {sessions} />
+    {/if}
     <Goals {sessions} {goals} onchange={refresh} onpush={pushEvent} />
     <SessionLog {sessions} {events} {debugMode} {seqMap} onchange={refresh} onpush={pushEvent} />
 
