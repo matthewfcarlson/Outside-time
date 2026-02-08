@@ -1,6 +1,7 @@
 <script lang="ts">
   import Timer from './lib/components/Timer.svelte';
   import Summary from './lib/components/Summary.svelte';
+  import Goals from './lib/components/Goals.svelte';
   import SessionLog from './lib/components/SessionLog.svelte';
   import IdentityQR from './lib/components/IdentityQR.svelte';
   import SyncStatus from './lib/components/SyncStatus.svelte';
@@ -11,10 +12,12 @@
     markEventSynced,
     clearPending,
     reconstructSessions,
+    reconstructGoals,
     findActiveTimerStart,
     loadActiveTimer,
     saveActiveTimer,
     type Session,
+    type Goal,
   } from './lib/session';
   import { ApiClient } from './lib/api';
   import { SyncEngine } from './lib/sync';
@@ -74,6 +77,7 @@
   // ─── State ─────────────────────────────────────────────────────────
   let events = $state(loadEvents());
   let sessions: Session[] = $derived(reconstructSessions(events));
+  let goals: Goal[] = $derived(reconstructGoals(events));
   let syncState = $state<'idle' | 'syncing' | 'error' | 'offline'>('idle');
   let lastSyncAt = $state(0);
   let showSettings = $state(false);
@@ -206,6 +210,7 @@
 
   <Timer onchange={refresh} onpush={pushEvent} {pullCount} />
   <Summary {sessions} />
+  <Goals {sessions} {goals} onchange={refresh} onpush={pushEvent} />
   <SessionLog {sessions} {events} {debugMode} {seqMap} onchange={refresh} onpush={pushEvent} />
 </main>
 
