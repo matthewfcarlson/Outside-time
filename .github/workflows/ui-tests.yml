@@ -45,7 +45,7 @@ jobs:
           path: web-app/playwright-report/
           retention-days: 30
 
-      # Upload raw screenshots as a separate artifact for easy browsing
+      # Upload raw screenshots as a separate artifact
       - name: Upload screenshots artifact
         uses: actions/upload-artifact@v4
         if: always()
@@ -55,67 +55,161 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # Collect screenshot filenames for the PR comment
-      - name: Collect screenshot info
-        if: always()
-        id: screenshots
-        working-directory: web-app
-        run: |
-          count=$(find test-results -name '*.png' 2>/dev/null | wc -l)
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
-      # Post screenshots inline on the PR using a dedicated branch for image hosting
+      # Push screenshots to an orphan branch so they have public raw URLs,
+      # then post a PR comment with the images embedded inline.
       - name: Post screenshots to PR
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
         with:
           script: |
             const fs = require('fs');
             const path = require('path');
             const { execSync } = require('child_process');
 
-            // Find all PNG screenshots in test-results
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.issue.number;
+            const runId = context.runId;
+            const sha = context.sha.slice(0, 8);
+            const screenshotBranch = '_ci-screenshots';
+            const screenshotDir = `runs/${runId}-${sha}`;
+
+            // Find all PNG screenshots
             let pngs = [];
             try {
-              const out = execSync('find web-app/test-results -name "*.png" -type f | sort', { encoding: 'utf8' });
+              const out = execSync(
+                'find web-app/test-results -name "*.png" -type f | sort',
+                { encoding: 'utf8' }
+              );
               pngs = out.trim().split('\n').filter(Boolean);
             } catch {
               pngs = [];
             }
 
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const testStatus = '${{ steps.tests.outcome }}';
+            const testStatus = process.env.TEST_OUTCOME;
             const statusIcon = testStatus === 'success' ? ':white_check_mark:' : ':x:';
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}`;
 
             let body = `## ${statusIcon} UI Test Screenshots\n\n`;
-            body += `**Status**: ${testStatus === 'success' ? 'All tests passed' : 'Some tests failed'}\n\n`;
+            body += `**Status**: ${testStatus === 'success' ? 'All tests passed' : 'Some tests failed'}  \n`;
+            body += `**Commit**: \`${context.sha.slice(0, 8)}\` | [Workflow run](${runUrl})\n\n`;
 
             if (pngs.length > 0) {
-              // Upload screenshots to a branch so they can be embedded inline
-              // For now, link to the artifacts since it's the most reliable approach
-              body += `### Screenshots captured: ${pngs.length}\n\n`;
-              body += `<details>\n<summary>Screenshot list (click to expand)</summary>\n\n`;
+              // Push screenshots to the orphan branch via the Git Trees API
+              // so they have permanent raw.githubusercontent.com URLs.
 
-              for (const png of pngs) {
-                const name = path.basename(png, '.png');
-                const dir = path.basename(path.dirname(png));
-                body += `- \`${dir}/${name}\`\n`;
+              // 1. Check if the branch exists; if not, create an orphan root
+              let baseTreeSha;
+              let parentCommitSha;
+              try {
+                const { data: ref } = await github.rest.git.getRef({
+                  owner, repo,
+                  ref: `heads/${screenshotBranch}`,
+                });
+                parentCommitSha = ref.object.sha;
+                const { data: commit } = await github.rest.git.getCommit({
+                  owner, repo,
+                  commit_sha: parentCommitSha,
+                });
+                baseTreeSha = commit.tree.sha;
+              } catch {
+                // Branch doesn't exist yet — we'll create it with no parent
+                parentCommitSha = null;
+                baseTreeSha = null;
               }
-              body += `\n</details>\n\n`;
-              body += `> Download the **test-screenshots** artifact to view all screenshots,\n`;
-              body += `> or download **playwright-report** and open \`index.html\` for the full\n`;
-              body += `> interactive report with screenshots embedded inline.\n\n`;
+
+              // 2. Create blobs for each screenshot
+              const treeItems = [];
+              for (const png of pngs) {
+                const content = fs.readFileSync(png).toString('base64');
+                const { data: blob } = await github.rest.git.createBlob({
+                  owner, repo,
+                  content,
+                  encoding: 'base64',
+                });
+
+                // Flatten into a readable path
+                const relPath = png.replace('web-app/test-results/', '');
+                treeItems.push({
+                  path: `${screenshotDir}/${relPath}`,
+                  mode: '100644',
+                  type: 'blob',
+                  sha: blob.sha,
+                });
+              }
+
+              // 3. Create a tree
+              const treeParams = { owner, repo, tree: treeItems };
+              if (baseTreeSha) treeParams.base_tree = baseTreeSha;
+              const { data: tree } = await github.rest.git.createTree(treeParams);
+
+              // 4. Create a commit
+              const commitParams = {
+                owner, repo,
+                message: `UI test screenshots for PR #${prNumber} (run ${runId})`,
+                tree: tree.sha,
+              };
+              if (parentCommitSha) commitParams.parents = [parentCommitSha];
+              else commitParams.parents = [];
+              const { data: newCommit } = await github.rest.git.createCommit(commitParams);
+
+              // 5. Update or create the branch ref
+              try {
+                await github.rest.git.updateRef({
+                  owner, repo,
+                  ref: `heads/${screenshotBranch}`,
+                  sha: newCommit.sha,
+                });
+              } catch {
+                await github.rest.git.createRef({
+                  owner, repo,
+                  ref: `refs/heads/${screenshotBranch}`,
+                  sha: newCommit.sha,
+                });
+              }
+
+              // 6. Build the PR comment with embedded images
+              // Group screenshots by test (parent directory)
+              const grouped = {};
+              for (const png of pngs) {
+                const relPath = png.replace('web-app/test-results/', '');
+                const parts = relPath.split('/');
+                const testName = parts.slice(0, -1).join('/');
+                const fileName = parts[parts.length - 1];
+                if (!grouped[testName]) grouped[testName] = [];
+                grouped[testName].push({ relPath, fileName });
+              }
+
+              const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${screenshotBranch}/${screenshotDir}`;
+
+              for (const [testName, files] of Object.entries(grouped)) {
+                const cleanName = testName
+                  .replace(/-chromium$/, '')
+                  .replace(/-/g, ' ')
+                  .replace(/\b\w/g, c => c.toUpperCase());
+
+                body += `### ${cleanName}\n\n`;
+                body += `<details>\n<summary>Screenshots (${files.length})</summary>\n\n`;
+
+                for (const { relPath, fileName } of files) {
+                  const label = fileName.replace('.png', '').replace(/-/g, ' ');
+                  const url = `${rawBase}/${relPath}`;
+                  body += `**${label}**\n\n`;
+                  body += `![${label}](${url})\n\n`;
+                }
+
+                body += `</details>\n\n`;
+              }
             } else {
               body += `_No screenshots were captured._\n\n`;
             }
 
-            body += `:link: [View workflow run](${runUrl})\n`;
-
-            // Find and update existing comment, or create a new one
+            // Find and update existing bot comment, or create a new one
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
+              owner, repo,
+              issue_number: prNumber,
             });
 
             const marker = '## :white_check_mark: UI Test Screenshots';
@@ -126,16 +220,14 @@ jobs:
 
             if (existing) {
               await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner, repo,
                 comment_id: existing.id,
                 body,
               });
             } else {
               await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
+                owner, repo,
+                issue_number: prNumber,
                 body,
               });
             }
