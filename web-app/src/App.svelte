@@ -218,7 +218,7 @@
           <ul class="about-list">
             <li>Tap <strong>Go Outside</strong> to start tracking a session</li>
             <li>Tap <strong>I'm Back Inside</strong> when you return</li>
-            <li>Time is tracked in 10-minute increments (minimum 10 min)</li>
+            <li>Time is rounded up to the nearest minute</li>
             <li>Set daily, weekly, monthly, or yearly goals</li>
             <li>Sync across devices by scanning a QR code in Settings</li>
           </ul>
@@ -236,24 +236,26 @@
     </div>
   {:else}
     <header>
-      <h1>Outside Time</h1>
-      <p class="tagline">Track your outdoor time, privately.</p>
-      <div class="header-buttons">
-        <button
-          class="header-btn"
-          onclick={() => (showAbout = true)}
-          aria-label="About"
-        >
-          About
-        </button>
-        <button
-          class="header-btn"
-          onclick={() => (showSettings = !showSettings)}
-          aria-label="Settings"
-        >
-          {showSettings ? 'Close' : 'Settings'}
-        </button>
+      <div class="header-row">
+        <h1>Outside Time</h1>
+        <div class="header-buttons">
+          <button
+            class="header-btn"
+            onclick={() => (showAbout = true)}
+            aria-label="About"
+          >
+            About
+          </button>
+          <button
+            class="header-btn"
+            onclick={() => (showSettings = !showSettings)}
+            aria-label="Settings"
+          >
+            {showSettings ? 'Close' : 'Settings'}
+          </button>
+        </div>
       </div>
+      <p class="tagline">Track your outdoor time, privately.</p>
     </header>
 
     {#if showSettings}
@@ -306,11 +308,20 @@
     text-align: center;
     padding: 1.5rem 1rem 1rem;
     position: relative;
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 0 0 0.75rem 0.75rem;
     margin: 0 0.5rem;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  }
+
+  .header-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
   }
 
   h1 {
@@ -328,8 +339,7 @@
 
   .header-buttons {
     position: absolute;
-    top: 1.5rem;
-    right: 1rem;
+    right: 0;
     display: flex;
     gap: 0.375rem;
   }
@@ -338,15 +348,17 @@
     padding: 0.375rem 0.75rem;
     font-size: 0.8125rem;
     font-weight: 500;
-    background: #e9ecef;
+    background: rgba(255, 255, 255, 0.5);
     color: #495057;
-    border: none;
+    border: 1px solid rgba(255, 255, 255, 0.4);
     border-radius: 0.375rem;
     cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .header-btn:hover {
-    background: #dee2e6;
+    background: rgba(255, 255, 255, 0.7);
   }
 
   /* About page */
@@ -364,15 +376,17 @@
     padding: 0.375rem 0.75rem;
     font-size: 0.8125rem;
     font-weight: 500;
-    background: #e9ecef;
+    background: rgba(255, 255, 255, 0.5);
     color: #495057;
-    border: none;
+    border: 1px solid rgba(255, 255, 255, 0.4);
     border-radius: 0.375rem;
     cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .back-btn:hover {
-    background: #dee2e6;
+    background: rgba(255, 255, 255, 0.7);
   }
 
   .about-content {
@@ -380,11 +394,14 @@
   }
 
   .about-card {
-    background: white;
+    background: rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 0.5rem;
     padding: 1rem 1.25rem;
     margin-bottom: 0.75rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   }
 
   .about-card h2 {
@@ -411,9 +428,12 @@
   .settings-panel {
     padding: 1rem;
     margin: 1rem 1rem 0;
-    background: white;
+    background: rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 0.5rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   }
 
   .debug-toggle {

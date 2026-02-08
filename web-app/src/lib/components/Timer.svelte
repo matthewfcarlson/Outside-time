@@ -78,10 +78,16 @@
   </div>
   {#if isRunning}
     <button class="timer-btn stop" onclick={stopTimer}>
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true">
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
       Come Back In
     </button>
   {:else}
     <button class="timer-btn start" onclick={startTimer}>
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true">
+        <polygon points="6,4 20,12 6,20" />
+      </svg>
       Go Outside
     </button>
   {/if}
@@ -100,6 +106,7 @@
     color: #495057;
     margin-bottom: 1.5rem;
     letter-spacing: 0.05em;
+    text-shadow: 0 1px 4px rgba(255, 255, 255, 0.8);
   }
 
   .timer-display.running {
@@ -107,6 +114,9 @@
   }
 
   .timer-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.875rem 2.5rem;
     font-size: 1.125rem;
     font-weight: 600;
@@ -114,6 +124,12 @@
     border-radius: 0.5rem;
     cursor: pointer;
     transition: background-color 0.2s, transform 0.1s;
+  }
+
+  .btn-icon {
+    width: 1.125rem;
+    height: 1.125rem;
+    flex-shrink: 0;
   }
 
   .timer-btn:active {

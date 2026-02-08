@@ -13,14 +13,12 @@ A privacy-first app to track how much time you spend outdoors. Your data is encr
 
 ### Time Tracking
 
-All outdoor time is tracked in **10-minute increments**.
+All outdoor time is **rounded up to the nearest minute**.
 
 1. **Start Timer** — Tap "Go Outside" when you head outdoors
-2. **Stop Timer** — Tap "I'm Back Inside" when you return
+2. **Stop Timer** — Tap "Come Back In" when you return
 3. **Multiple Sessions** — Go back out anytime, each session adds to your daily total
 4. **Manual Entry** — Forgot to track? Add past sessions anytime
-
-Example: 23 minutes → rounds to 20 min. 27 minutes → rounds to 30 min. Minimum recorded time is 10 minutes.
 
 ### Under the Hood
 
