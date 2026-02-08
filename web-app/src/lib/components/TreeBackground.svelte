@@ -4,6 +4,7 @@
 
 <div class="tree-bg" aria-hidden="true">
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMax slice">
+    <g transform="translate(0,800) scale(1,0.6) translate(0,-800)">
     <!-- Ground -->
     <ellipse cx="600" cy="810" rx="700" ry="60" fill="#c5cfc2" opacity="0.3" />
 
@@ -128,6 +129,7 @@
     <circle class="leaf leaf-3" cx="800" cy="350" r="2" fill="#7d9478" opacity="0.15" />
     <circle class="leaf leaf-4" cx="1000" cy="250" r="1.5" fill="#8fa88a" opacity="0.18" />
     <circle class="leaf leaf-5" cx="350" cy="150" r="1.5" fill="#8fa88a" opacity="0.15" />
+    </g>
   </svg>
 </div>
 
