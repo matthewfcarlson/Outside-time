@@ -202,44 +202,67 @@ jobs:
               }
 
               // ── Build PR comment with embedded images & per-test emojis ──
-              // Group screenshots by test (parent directory)
+              // Group screenshots by test. Retries produce dirs like
+              // "Test-name-chromium-retry1", so we group them under the
+              // base test name and label the attempt.
               const grouped = {};
               for (const png of pngs) {
                 const relPath = png.replace('web-app/test-results/', '');
                 const parts = relPath.split('/');
-                const testName = parts.slice(0, -1).join('/');
+                const dirName = parts.slice(0, -1).join('/');
                 const fileName = parts[parts.length - 1];
-                if (!grouped[testName]) grouped[testName] = [];
-                grouped[testName].push({ relPath, fileName });
+
+                // Strip "-retryN" suffix to group retries with original
+                const retryMatch = dirName.match(/-retry(\d+)$/);
+                const baseName = retryMatch ? dirName.replace(/-retry\d+$/, '') : dirName;
+                const attempt = retryMatch ? parseInt(retryMatch[1], 10) + 1 : 1;
+
+                if (!grouped[baseName]) grouped[baseName] = [];
+                grouped[baseName].push({ relPath, fileName, attempt, dirName });
               }
 
               const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${screenshotBranch}/${screenshotDir}`;
 
-              for (const [testName, files] of Object.entries(grouped)) {
+              for (const [baseName, files] of Object.entries(grouped)) {
                 // Determine pass/fail emoji from the JSON results
-                // testName is the directory name, e.g. "Home-page-loads-and-shows-main-UI-elements-chromium"
-                const status = testStatusMap[testName];
+                const status = testStatusMap[baseName];
                 let emoji = ':grey_question:';
                 if (status === 'passed') emoji = ':white_check_mark:';
                 else if (status === 'failed') emoji = ':x:';
 
-                const cleanName = testName
+                const cleanName = baseName
                   .replace(/-chromium$/, '')
                   .replace(/-iphone-16$/, ' (iPhone 16)')
                   .replace(/-/g, ' ')
                   .replace(/\b\w/g, c => c.toUpperCase());
 
-                body += `### ${emoji} ${cleanName}\n\n`;
-                body += `<details>\n<summary>Screenshots (${files.length})</summary>\n\n`;
+                const hasRetries = files.some(f => f.attempt > 1);
+                const maxAttempt = Math.max(...files.map(f => f.attempt));
 
-                for (const { relPath, fileName } of files) {
-                  const label = fileName.replace('.png', '').replace(/-/g, ' ');
-                  const url = `${rawBase}/${relPath}`;
-                  body += `**${label}**\n\n`;
-                  body += `![${label}](${url})\n\n`;
+                body += `### ${emoji} ${cleanName}\n\n`;
+
+                if (hasRetries) {
+                  // Show each attempt separately
+                  for (let a = 1; a <= maxAttempt; a++) {
+                    const attemptFiles = files.filter(f => f.attempt === a);
+                    if (attemptFiles.length === 0) continue;
+                    const label = a === 1 ? 'Initial attempt' : `Retry ${a - 1}`;
+                    body += `**${label}**\n\n`;
+                    for (const { relPath, fileName } of attemptFiles) {
+                      const imgLabel = fileName.replace('.png', '').replace(/-/g, ' ');
+                      const url = `${rawBase}/${relPath}`;
+                      body += `![${imgLabel}](${url})\n\n`;
+                    }
+                  }
+                } else {
+                  for (const { relPath, fileName } of files) {
+                    const imgLabel = fileName.replace('.png', '').replace(/-/g, ' ');
+                    const url = `${rawBase}/${relPath}`;
+                    body += `![${imgLabel}](${url})\n\n`;
+                  }
                 }
 
-                body += `</details>\n\n`;
+                body += `---\n\n`;
               }
             } else {
               body += `_No screenshots were captured._\n\n`;
