@@ -284,10 +284,13 @@
   }
 
   .header-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: center;
-    position: relative;
+  }
+
+  .header-row h1 {
+    grid-column: 2;
   }
 
   h1 {
@@ -295,6 +298,7 @@
     font-size: 1.5rem;
     font-weight: 700;
     color: #2d6a4f;
+    white-space: nowrap;
   }
 
   .tagline {
@@ -304,9 +308,9 @@
   }
 
   .header-buttons {
-    position: absolute;
-    right: 0;
+    grid-column: 3;
     display: flex;
+    justify-content: flex-end;
     gap: 0.375rem;
   }
 
