@@ -244,6 +244,7 @@
     padding: 1rem;
     margin-bottom: 0.75rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
   }
 
   .form-row {
@@ -251,6 +252,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
     margin-bottom: 0.75rem;
+    min-width: 0;
   }
 
   .form-label {
@@ -262,6 +264,8 @@
     color: #6c757d;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .form-label input {
@@ -270,6 +274,9 @@
     border-radius: 0.375rem;
     font-size: 0.875rem;
     color: #212529;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .form-label input:focus {
