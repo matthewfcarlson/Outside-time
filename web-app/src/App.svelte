@@ -105,9 +105,7 @@
 
   // ─── Sync Engine ───────────────────────────────────────────────────
   const api = new ApiClient(API_BASE);
-  // Note: syncEngine is always reassigned alongside identity in switchIdentity()
-  // eslint-disable-next-line svelte/state_referenced_locally
-  let syncEngine = $state(new SyncEngine(api, cache, identity));
+  let syncEngine = $derived(new SyncEngine(api, cache, identity));
 
   // ─── Router ───────────────────────────────────────────────────────
   let currentPath = $state(window.location.pathname);
@@ -158,7 +156,7 @@
     const newIdentity = importSecretKey(keyBase64);
     cache.saveIdentity(keyBase64);
     identity = newIdentity;
-    syncEngine = new SyncEngine(api, cache, newIdentity);
+    // syncEngine is automatically derived from identity
     seqMap = new Map();
   }
 

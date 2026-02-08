@@ -5,5 +5,8 @@
     "packages/*",
     "web-app",
     "cloudflare-workers"
-  ]
+  ],
+  "devDependencies": {
+    "wrangler": "^3.25.0"
+  }
 }
