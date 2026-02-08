@@ -14,10 +14,9 @@
     "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
+    "@outside-time/core": "*",
     "qrcode": "^1.5.4",
-    "svelte": "^5.50.0",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1"
+    "svelte": "^5.50.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
