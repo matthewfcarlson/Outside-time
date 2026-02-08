@@ -293,25 +293,7 @@
     />
   {:else}
     <header>
-      <div class="header-row">
-        <h1>Outside Time</h1>
-        <div class="header-buttons">
-          <button
-            class="header-btn"
-            onclick={() => navigate('/about')}
-            aria-label="About"
-          >
-            About
-          </button>
-          <button
-            class="header-btn"
-            onclick={() => navigate('/settings')}
-            aria-label="Settings"
-          >
-            Settings
-          </button>
-        </div>
-      </div>
+      <h1>Outside Time</h1>
       <p class="tagline">Track your outdoor time, privately.</p>
     </header>
 
@@ -319,6 +301,15 @@
     <Summary {sessions} />
     <Goals {sessions} {goals} onchange={refresh} onpush={pushEvent} />
     <SessionLog {sessions} {events} {debugMode} {seqMap} onchange={refresh} onpush={pushEvent} />
+
+    <nav class="bottom-bar">
+      <button class="bottom-btn" onclick={() => navigate('/about')} aria-label="About">
+        About
+      </button>
+      <button class="bottom-btn" onclick={() => navigate('/settings')} aria-label="Settings">
+        Settings
+      </button>
+    </nav>
   {/if}
 </main>
 
@@ -343,7 +334,7 @@
   main {
     max-width: 480px;
     margin: 0 auto;
-    padding: 1rem 0 3rem;
+    padding: 1rem 0 5rem;
     position: relative;
     z-index: 1;
   }
@@ -361,22 +352,11 @@
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   }
 
-  .header-row {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-  }
-
-  .header-row h1 {
-    grid-column: 2;
-  }
-
   h1 {
     margin: 0 0 0.25rem;
     font-size: 1.5rem;
     font-weight: 700;
     color: #2d6a4f;
-    white-space: nowrap;
   }
 
   .tagline {
@@ -385,27 +365,37 @@
     color: #6c757d;
   }
 
-  .header-buttons {
-    grid-column: 3;
+  .bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
     display: flex;
-    justify-content: flex-end;
-    gap: 0.375rem;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border-top: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+    z-index: 10;
   }
 
-  .header-btn {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
+  .bottom-btn {
+    padding: 0.5rem 1.25rem;
+    font-size: 0.875rem;
     font-weight: 500;
     background: rgba(255, 255, 255, 0.5);
     color: #495057;
     border: 1px solid rgba(255, 255, 255, 0.4);
-    border-radius: 0.375rem;
+    border-radius: 0.5rem;
     cursor: pointer;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
   }
 
-  .header-btn:hover {
+  .bottom-btn:hover {
     background: rgba(255, 255, 255, 0.7);
   }
 </style>
