@@ -3,6 +3,7 @@
   import Summary from './lib/components/Summary.svelte';
   import Goals from './lib/components/Goals.svelte';
   import SessionLog from './lib/components/SessionLog.svelte';
+  import Onboarding from './lib/components/Onboarding.svelte';
   import About from './lib/components/About.svelte';
   import Settings from './lib/components/Settings.svelte';
   import TreeBackground from './lib/components/TreeBackground.svelte';
@@ -132,6 +133,13 @@
   let syncState = $state<'idle' | 'syncing' | 'error' | 'offline'>('idle');
   let lastSyncAt = $state(0);
   let debugMode = $state(localStorage.getItem('ot:debugMode') === 'true');
+  let onboardingDismissed = $state(localStorage.getItem('ot:onboardingDismissed') === 'true');
+  let showOnboarding = $derived(sessions.length === 0 && !onboardingDismissed);
+
+  function dismissOnboarding() {
+    onboardingDismissed = true;
+    localStorage.setItem('ot:onboardingDismissed', 'true');
+  }
   let seqMap = $state(new Map<string, number>());
   let pullCount = $state(0);
 
@@ -298,6 +306,9 @@
     </header>
 
     <Timer onchange={refresh} onpush={pushEvent} {pullCount} />
+    {#if showOnboarding}
+      <Onboarding onDismiss={dismissOnboarding} />
+    {/if}
     {#if goals.length === 0}
       <Summary {sessions} />
     {/if}
