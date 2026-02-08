@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev -c ../wrangler.toml",
     "build": "cd .. && npm run build -w outside-time-web",
-    "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute outside-time-db --local --file=./schema.sql",
-    "db:init:remote": "wrangler d1 execute outside-time-db --file=./schema.sql",
+    "deploy": "wrangler deploy -c ../wrangler.toml",
+    "db:init": "wrangler d1 execute outside-time-db --local --file=./schema.sql -c ../wrangler.toml",
+    "db:init:remote": "wrangler d1 execute outside-time-db --file=./schema.sql -c ../wrangler.toml",
     "test": "vitest"
   },
   "dependencies": {
