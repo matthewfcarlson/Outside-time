@@ -1,13 +1,13 @@
 name = "outside-time"
-main = "src/index.ts"
+main = "cloudflare-workers/src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 [build]
-command = "cd .. && npm ci && npm run build -w outside-time-web"
+command = "npm ci && npm run build -w outside-time-web"
 
 [assets]
-directory = "../web-app/dist"
+directory = "web-app/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 

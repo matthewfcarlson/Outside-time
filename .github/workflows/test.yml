@@ -37,7 +37,7 @@ jobs:
 
       - run: npm ci
 
-      # Workers tests require web-app/dist to exist (referenced in wrangler.toml assets)
+      # Workers tests require web-app/dist to exist (referenced in root wrangler.toml assets)
       - run: npm run build -w outside-time-web
 
       - run: npx vitest run
