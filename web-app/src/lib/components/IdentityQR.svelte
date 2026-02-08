@@ -17,7 +17,7 @@
   async function confirmShowQR() {
     showWarning = false;
     const secretKeyBase64 = exportSecretKey(identity);
-    syncUrl = `${window.location.origin}${window.location.pathname}#key=${encodeURIComponent(secretKeyBase64)}`;
+    syncUrl = `${window.location.origin}/#key=${encodeURIComponent(secretKeyBase64)}`;
     try {
       qrDataUrl = await QRCode.toDataURL(syncUrl, {
         width: 256,

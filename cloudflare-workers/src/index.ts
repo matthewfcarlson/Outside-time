@@ -54,7 +54,21 @@ export default {
       });
     }
 
-    // Serve static assets for everything else
+    // Funny response for PHP probes
+    if (url.pathname.endsWith('.php')) {
+      return new Response(
+        '<?php echo "Nice try! This is not a PHP site. Maybe go outside instead? 🌲"; ?>\n\n' +
+        'HTTP 418 - I\'m a teapot, not a PHP server.\n' +
+        'This app is built with modern web technologies.\n' +
+        'No wp-admin here. No phpMyAdmin. Just fresh air and encrypted bytes.\n',
+        {
+          status: 418,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        },
+      );
+    }
+
+    // Serve static assets / SPA fallback for everything else
     return env.ASSETS.fetch(request);
   },
 };

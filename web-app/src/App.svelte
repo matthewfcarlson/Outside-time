@@ -3,8 +3,8 @@
   import Summary from './lib/components/Summary.svelte';
   import Goals from './lib/components/Goals.svelte';
   import SessionLog from './lib/components/SessionLog.svelte';
-  import IdentityQR from './lib/components/IdentityQR.svelte';
-  import SyncStatus from './lib/components/SyncStatus.svelte';
+  import About from './lib/components/About.svelte';
+  import Settings from './lib/components/Settings.svelte';
   import TreeBackground from './lib/components/TreeBackground.svelte';
   import {
     loadEvents,
@@ -45,8 +45,8 @@
       try {
         const identity = importSecretKey(keyBase64);
         cache.saveIdentity(keyBase64);
-        // Clear the hash to avoid leaking the key in browser history
-        history.replaceState(null, '', window.location.pathname + window.location.search);
+        // Clear the hash and navigate to root to avoid leaking the key
+        history.replaceState(null, '', '/');
         return identity;
       } catch (e) {
         console.warn('Failed to import identity from URL hash:', e);
@@ -75,14 +75,29 @@
   const api = new ApiClient(API_BASE);
   const syncEngine = new SyncEngine(api, cache, identity);
 
+  // ─── Router ───────────────────────────────────────────────────────
+  let currentPath = $state(window.location.pathname);
+
+  function navigate(path: string) {
+    history.pushState(null, '', path);
+    currentPath = path;
+  }
+
+  // Handle browser back/forward buttons
+  $effect(() => {
+    const onPopState = () => {
+      currentPath = window.location.pathname;
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  });
+
   // ─── State ─────────────────────────────────────────────────────────
   let events = $state(loadEvents());
   let sessions: Session[] = $derived(reconstructSessions(events));
   let goals: Goal[] = $derived(reconstructGoals(events));
   let syncState = $state<'idle' | 'syncing' | 'error' | 'offline'>('idle');
   let lastSyncAt = $state(0);
-  let showSettings = $state(false);
-  let showAbout = $state(false);
   let debugMode = $state(localStorage.getItem('ot:debugMode') === 'true');
   let seqMap = $state(new Map<string, number>());
   let pullCount = $state(0);
@@ -186,54 +201,18 @@
 
 <TreeBackground />
 <main>
-  {#if showAbout}
-    <div class="about-page">
-      <header>
-        <button class="back-btn" onclick={() => (showAbout = false)} aria-label="Back">
-          &larr; Back
-        </button>
-        <h1>About Outside Time</h1>
-      </header>
-
-      <section class="about-content">
-        <div class="about-card">
-          <h2>What is this?</h2>
-          <p>
-            Outside Time helps you track how much time you spend outdoors. Use the timer when you
-            head outside, or add entries manually for times you forgot to track.
-          </p>
-        </div>
-
-        <div class="about-card">
-          <h2>Privacy first</h2>
-          <p>
-            Your data is encrypted on your device before it ever leaves your phone.
-            The server only stores encrypted blobs &mdash; it can never read your sessions,
-            goals, or any personal information.
-          </p>
-        </div>
-
-        <div class="about-card">
-          <h2>How it works</h2>
-          <ul class="about-list">
-            <li>Tap <strong>Go Outside</strong> to start tracking a session</li>
-            <li>Tap <strong>I'm Back Inside</strong> when you return</li>
-            <li>Time is rounded up to the nearest minute</li>
-            <li>Set daily, weekly, monthly, or yearly goals</li>
-            <li>Sync across devices by scanning a QR code in Settings</li>
-          </ul>
-        </div>
-
-        <div class="about-card">
-          <h2>Cross-device sync</h2>
-          <p>
-            Open <strong>Settings</strong> and scan the QR code on another device
-            to sync your data. The QR code contains your encrypted identity key &mdash;
-            keep it private.
-          </p>
-        </div>
-      </section>
-    </div>
+  {#if currentPath === '/about'}
+    <About onBack={() => navigate('/')} />
+  {:else if currentPath === '/settings'}
+    <Settings
+      {identity}
+      {syncState}
+      {lastSyncAt}
+      onSync={syncAll}
+      {debugMode}
+      onToggleDebug={toggleDebugMode}
+      onBack={() => navigate('/')}
+    />
   {:else}
     <header>
       <div class="header-row">
@@ -241,35 +220,22 @@
         <div class="header-buttons">
           <button
             class="header-btn"
-            onclick={() => (showAbout = true)}
+            onclick={() => navigate('/about')}
             aria-label="About"
           >
             About
           </button>
           <button
             class="header-btn"
-            onclick={() => (showSettings = !showSettings)}
+            onclick={() => navigate('/settings')}
             aria-label="Settings"
           >
-            {showSettings ? 'Close' : 'Settings'}
+            Settings
           </button>
         </div>
       </div>
       <p class="tagline">Track your outdoor time, privately.</p>
     </header>
-
-    {#if showSettings}
-      <section class="settings-panel">
-        <IdentityQR {identity} />
-        <SyncStatus state={syncState} {lastSyncAt} onSync={syncAll} />
-        <div class="debug-toggle">
-          <label class="debug-label">
-            <input type="checkbox" checked={debugMode} onchange={toggleDebugMode} />
-            Debug mode
-          </label>
-        </div>
-      </section>
-    {/if}
 
     <Timer onchange={refresh} onpush={pushEvent} {pullCount} />
     <Summary {sessions} />
@@ -359,99 +325,5 @@
 
   .header-btn:hover {
     background: rgba(255, 255, 255, 0.7);
-  }
-
-  /* About page */
-  .about-page header {
-    text-align: left;
-    padding: 1.5rem 1rem 0;
-    position: relative;
-  }
-
-  .about-page h1 {
-    text-align: center;
-  }
-
-  .back-btn {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    background: rgba(255, 255, 255, 0.5);
-    color: #495057;
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    border-radius: 0.375rem;
-    cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
-
-  .back-btn:hover {
-    background: rgba(255, 255, 255, 0.7);
-  }
-
-  .about-content {
-    padding: 1rem;
-  }
-
-  .about-card {
-    background: rgba(255, 255, 255, 0.45);
-    backdrop-filter: blur(16px) saturate(1.4);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    border-radius: 0.5rem;
-    padding: 1rem 1.25rem;
-    margin-bottom: 0.75rem;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  }
-
-  .about-card h2 {
-    margin: 0 0 0.5rem;
-    font-size: 1rem;
-    color: #2d6a4f;
-  }
-
-  .about-card p {
-    margin: 0;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    color: #495057;
-  }
-
-  .about-list {
-    margin: 0;
-    padding-left: 1.25rem;
-    font-size: 0.875rem;
-    line-height: 1.7;
-    color: #495057;
-  }
-
-  .settings-panel {
-    padding: 1rem;
-    margin: 1rem 1rem 0;
-    background: rgba(255, 255, 255, 0.45);
-    backdrop-filter: blur(16px) saturate(1.4);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    border-radius: 0.5rem;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  }
-
-  .debug-toggle {
-    padding-top: 0.75rem;
-    border-top: 1px solid #e9ecef;
-    margin-top: 0.75rem;
-  }
-
-  .debug-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8125rem;
-    color: #495057;
-    cursor: pointer;
-  }
-
-  .debug-label input[type='checkbox'] {
-    accent-color: #2d6a4f;
   }
 </style>
