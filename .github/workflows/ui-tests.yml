@@ -76,7 +76,42 @@ jobs:
             const screenshotBranch = '_ci-screenshots';
             const screenshotDir = `runs/${runId}-${sha}`;
 
-            // Find all PNG screenshots
+            // ── Read Playwright JSON results for per-test status ──
+            // The JSON reporter writes a results.json with nested suites/specs.
+            // We flatten it into a map: "dir-name-project" → "passed"|"failed"
+            const testStatusMap = {};
+            try {
+              const raw = fs.readFileSync('web-app/test-results/results.json', 'utf8');
+              const report = JSON.parse(raw);
+
+              function walkSuites(suites, parentTitles = []) {
+                for (const suite of suites) {
+                  const titles = [...parentTitles, suite.title];
+                  if (suite.specs) {
+                    for (const spec of suite.specs) {
+                      for (const test of spec.tests || []) {
+                        // Build the directory name Playwright uses for test artifacts:
+                        // "Suite-title-Test-title-projectName" with spaces → hyphens
+                        const fullTitle = [...titles.slice(1), spec.title]
+                          .join('-')
+                          .replace(/\s+/g, '-');
+                        const dirKey = `${fullTitle}-${test.projectName}`;
+                        const passed = test.status === 'expected';
+                        testStatusMap[dirKey] = passed ? 'passed' : 'failed';
+                      }
+                    }
+                  }
+                  if (suite.suites) {
+                    walkSuites(suite.suites, titles);
+                  }
+                }
+              }
+              walkSuites(report.suites || []);
+            } catch (e) {
+              core.info(`Could not read results.json: ${e.message}`);
+            }
+
+            // ── Find all PNG screenshots ──
             let pngs = [];
             try {
               const out = execSync(
@@ -97,8 +132,7 @@ jobs:
             body += `**Commit**: \`${context.sha.slice(0, 8)}\` | [Workflow run](${runUrl})\n\n`;
 
             if (pngs.length > 0) {
-              // Push screenshots to the orphan branch via the Git Trees API
-              // so they have permanent raw.githubusercontent.com URLs.
+              // ── Push screenshots to the orphan branch via Git Trees API ──
 
               // 1. Check if the branch exists; if not, create an orphan root
               let baseTreeSha;
@@ -115,7 +149,6 @@ jobs:
                 });
                 baseTreeSha = commit.tree.sha;
               } catch {
-                // Branch doesn't exist yet — we'll create it with no parent
                 parentCommitSha = null;
                 baseTreeSha = null;
               }
@@ -129,8 +162,6 @@ jobs:
                   content,
                   encoding: 'base64',
                 });
-
-                // Flatten into a readable path
                 const relPath = png.replace('web-app/test-results/', '');
                 treeItems.push({
                   path: `${screenshotDir}/${relPath}`,
@@ -170,7 +201,7 @@ jobs:
                 });
               }
 
-              // 6. Build the PR comment with embedded images
+              // ── Build PR comment with embedded images & per-test emojis ──
               // Group screenshots by test (parent directory)
               const grouped = {};
               for (const png of pngs) {
@@ -185,12 +216,20 @@ jobs:
               const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${screenshotBranch}/${screenshotDir}`;
 
               for (const [testName, files] of Object.entries(grouped)) {
+                // Determine pass/fail emoji from the JSON results
+                // testName is the directory name, e.g. "Home-page-loads-and-shows-main-UI-elements-chromium"
+                const status = testStatusMap[testName];
+                let emoji = ':grey_question:';
+                if (status === 'passed') emoji = ':white_check_mark:';
+                else if (status === 'failed') emoji = ':x:';
+
                 const cleanName = testName
                   .replace(/-chromium$/, '')
+                  .replace(/-iphone-16$/, ' (iPhone 16)')
                   .replace(/-/g, ' ')
                   .replace(/\b\w/g, c => c.toUpperCase());
 
-                body += `### ${cleanName}\n\n`;
+                body += `### ${emoji} ${cleanName}\n\n`;
                 body += `<details>\n<summary>Screenshots (${files.length})</summary>\n\n`;
 
                 for (const { relPath, fileName } of files) {
@@ -206,16 +245,14 @@ jobs:
               body += `_No screenshots were captured._\n\n`;
             }
 
-            // Find and update existing bot comment, or create a new one
+            // ── Find and update existing bot comment, or create a new one ──
             const { data: comments } = await github.rest.issues.listComments({
               owner, repo,
               issue_number: prNumber,
             });
 
-            const marker = '## :white_check_mark: UI Test Screenshots';
-            const markerFail = '## :x: UI Test Screenshots';
             const existing = comments.find(c =>
-              c.body?.startsWith(marker) || c.body?.startsWith(markerFail)
+              c.body?.includes('UI Test Screenshots')
             );
 
             if (existing) {
