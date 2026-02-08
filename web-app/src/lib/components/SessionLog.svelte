@@ -28,6 +28,8 @@
   let showManualForm = $state(false);
   let manualStart = $state('');
   let manualEnd = $state('');
+  let showAllSessions = $state(false);
+  const SESSION_DISPLAY_LIMIT = 10;
 
   function startEdit(session: Session) {
     editingId = session.id;
@@ -142,7 +144,7 @@
     <p class="empty">No sessions yet. Go outside!</p>
   {:else}
     <ul class="sessions">
-      {#each sessions as session (session.id)}
+      {#each (showAllSessions ? sessions : sessions.slice(0, SESSION_DISPLAY_LIMIT)) as session (session.id)}
         <li class="session-item">
           {#if editingId === session.id}
             <div class="entry-form">
@@ -202,6 +204,11 @@
         </li>
       {/each}
     </ul>
+    {#if !showAllSessions && sessions.length > SESSION_DISPLAY_LIMIT}
+      <button class="see-more-btn" onclick={() => showAllSessions = true}>
+        See more ({sessions.length - SESSION_DISPLAY_LIMIT} older sessions)
+      </button>
+    {/if}
   {/if}
 </div>
 
@@ -488,5 +495,26 @@
   .debug-seq.unsynced {
     background: #fff3cd;
     color: #664d03;
+  }
+
+  .see-more-btn {
+    display: block;
+    width: 100%;
+    padding: 0.625rem;
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #2d6a4f;
+    background: rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px dashed rgba(45, 106, 79, 0.3);
+    border-radius: 0.5rem;
+    cursor: pointer;
+  }
+
+  .see-more-btn:hover {
+    background: rgba(255, 255, 255, 0.55);
+    border-color: rgba(45, 106, 79, 0.5);
   }
 </style>
