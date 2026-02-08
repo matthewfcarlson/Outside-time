@@ -5,6 +5,7 @@
   import SessionLog from './lib/components/SessionLog.svelte';
   import IdentityQR from './lib/components/IdentityQR.svelte';
   import SyncStatus from './lib/components/SyncStatus.svelte';
+  import TreeBackground from './lib/components/TreeBackground.svelte';
   import {
     loadEvents,
     appendPulledEvents,
@@ -183,6 +184,7 @@
   });
 </script>
 
+<TreeBackground />
 <main>
   {#if showAbout}
     <div class="about-page">
@@ -278,12 +280,14 @@
   :global(body) {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
       Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
-    background: #f0f2f0;
+    background: linear-gradient(180deg, #dcecd5 0%, #e8f0e4 40%, #f0f2f0 100%);
+    background-attachment: fixed;
     margin: 0;
     padding: 0;
     color: #212529;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
   }
 
   :global(*) {
@@ -294,12 +298,19 @@
     max-width: 480px;
     margin: 0 auto;
     padding: 1rem 0 3rem;
+    position: relative;
+    z-index: 1;
   }
 
   header {
     text-align: center;
-    padding: 1.5rem 1rem 0;
+    padding: 1.5rem 1rem 1rem;
     position: relative;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 0 0 0.75rem 0.75rem;
+    margin: 0 0.5rem;
   }
 
   h1 {
