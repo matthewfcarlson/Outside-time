@@ -23,9 +23,10 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web-app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        working-directory: .
         run: npm ci
 
       - name: Install Playwright browsers
@@ -76,10 +77,22 @@ jobs:
             const screenshotBranch = '_ci-screenshots';
             const screenshotDir = `runs/${runId}-${sha}`;
 
-            // ── Read Playwright JSON results for per-test status ──
+            // ── Read step descriptions written by takeStepScreenshot() ──
+            let stepDescriptions = {};
+            try {
+              const raw = fs.readFileSync('web-app/test-results/step-descriptions.json', 'utf8');
+              stepDescriptions = JSON.parse(raw);
+            } catch (e) {
+              core.info(`No step descriptions found: ${e.message}`);
+            }
+
+            // ── Read Playwright JSON results for per-test status & errors ──
             // The JSON reporter writes a results.json with nested suites/specs.
-            // We flatten it into a map: "dir-name-project" → "passed"|"failed"
+            // We flatten it into maps:
+            //   testStatusMap: "dir-name-project" → "passed"|"failed"
+            //   testErrorMap:  "dir-name-project" → "error message"
             const testStatusMap = {};
+            const testErrorMap = {};
             try {
               const raw = fs.readFileSync('web-app/test-results/results.json', 'utf8');
               const report = JSON.parse(raw);
@@ -98,6 +111,16 @@ jobs:
                         const dirKey = `${fullTitle}-${test.projectName}`;
                         const passed = test.status === 'expected';
                         testStatusMap[dirKey] = passed ? 'passed' : 'failed';
+
+                        // Extract error message from the last result for failed tests
+                        if (!passed) {
+                          const results = test.results || [];
+                          for (const result of results) {
+                            if (result.error?.message) {
+                              testErrorMap[dirKey] = result.error.message;
+                            }
+                          }
+                        }
                       }
                     }
                   }
@@ -251,6 +274,20 @@ jobs:
                 const projectList = [...new Set(files.map(f => f.project))].sort();
 
                 body += `### ${emoji} ${cleanName}\n\n`;
+
+                // Show error messages for failed tests
+                const failedProjects = projects.filter(k => testStatusMap[k] === 'failed');
+                for (const fp of failedProjects) {
+                  const errMsg = testErrorMap[fp];
+                  if (errMsg) {
+                    const projSuffix = fp.replace(`${testKey}-`, '');
+                    const projLabel = projSuffix === 'iphone-16' ? 'iPhone 16' : 'Desktop';
+                    // Truncate long error messages
+                    const truncated = errMsg.length > 500 ? errMsg.slice(0, 500) + '...' : errMsg;
+                    body += `> **${projLabel} failure:** ${truncated}\n\n`;
+                  }
+                }
+
                 body += `<details>\n<summary>Screenshots (${totalScreenshots})</summary>\n\n`;
 
                 // Render each project's screenshots
@@ -270,12 +307,24 @@ jobs:
                       body += `**${label}**\n\n`;
                       for (const { relPath, fileName } of attemptFiles) {
                         const imgLabel = fileName.replace('.png', '').replace(/-/g, ' ');
+                        // Look up step description
+                        const descKey = `${testKey}/${fileName.replace('.png', '')}`;
+                        const desc = stepDescriptions[descKey];
+                        if (desc) {
+                          body += `**${imgLabel}** — _${desc}_\n\n`;
+                        }
                         body += `![${imgLabel}](${rawBase}/${relPath})\n\n`;
                       }
                     }
                   } else {
                     for (const { relPath, fileName } of projFiles) {
                       const imgLabel = fileName.replace('.png', '').replace(/-/g, ' ');
+                      // Look up step description
+                      const descKey = `${testKey}/${fileName.replace('.png', '')}`;
+                      const desc = stepDescriptions[descKey];
+                      if (desc) {
+                        body += `**${imgLabel}** — _${desc}_\n\n`;
+                      }
                       body += `![${imgLabel}](${rawBase}/${relPath})\n\n`;
                     }
                   }
