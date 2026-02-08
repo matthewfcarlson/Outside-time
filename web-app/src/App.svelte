@@ -6,12 +6,15 @@
   import About from './lib/components/About.svelte';
   import Settings from './lib/components/Settings.svelte';
   import TreeBackground from './lib/components/TreeBackground.svelte';
+  import MergePrompt from './lib/components/MergePrompt.svelte';
   import {
     loadEvents,
     appendPulledEvents,
     loadPendingEvents,
     markEventSynced,
     clearPending,
+    markAllPending,
+    clearLocalData,
     reconstructSessions,
     reconstructGoals,
     findActiveTimerStart,
@@ -37,17 +40,45 @@
   // ─── Identity ──────────────────────────────────────────────────────
   const cache = new EventCache();
 
+  /** Pending key import base64, set when user has events and opens a key link */
+  let pendingKeyImport = $state<string | null>(null);
+  let showMergePrompt = $state(false);
+
   function getOrCreateIdentity(): Identity {
     // Check URL hash for imported identity: #key=BASE64_SECRET_KEY
     const hash = window.location.hash;
     if (hash.startsWith('#key=')) {
       const keyBase64 = decodeURIComponent(hash.slice(5));
+      // Clear the hash and navigate to root to avoid leaking the key
+      history.replaceState(null, '', '/');
+
       try {
-        const identity = importSecretKey(keyBase64);
+        const newIdentity = importSecretKey(keyBase64);
+
+        // Check if we already have a different identity with local events
+        const existingKeyBase64 = cache.loadIdentity();
+        if (existingKeyBase64) {
+          try {
+            const existingIdentity = importSecretKey(existingKeyBase64);
+            if (existingIdentity.publicKeyHex !== newIdentity.publicKeyHex) {
+              const localEvents = loadEvents();
+              if (localEvents.length > 0) {
+                // Defer the import — show the merge prompt
+                pendingKeyImport = keyBase64;
+                showMergePrompt = true;
+                return existingIdentity;
+              }
+            }
+          } catch {
+            // Existing identity is corrupt, proceed with import
+          }
+        }
+
+        // No conflict — import directly
         cache.saveIdentity(keyBase64);
         // Clear the hash and navigate to root to avoid leaking the key
         history.replaceState(null, '', '/');
-        return identity;
+        return newIdentity;
       } catch (e) {
         console.warn('Failed to import identity from URL hash:', e);
       }
@@ -69,11 +100,13 @@
     return identity;
   }
 
-  const identity = getOrCreateIdentity();
+  let identity = $state(getOrCreateIdentity());
 
   // ─── Sync Engine ───────────────────────────────────────────────────
   const api = new ApiClient(API_BASE);
-  const syncEngine = new SyncEngine(api, cache, identity);
+  // Note: syncEngine is always reassigned alongside identity in switchIdentity()
+  // eslint-disable-next-line svelte/state_referenced_locally
+  let syncEngine = $state(new SyncEngine(api, cache, identity));
 
   // ─── Router ───────────────────────────────────────────────────────
   let currentPath = $state(window.location.pathname);
@@ -109,6 +142,41 @@
   function toggleDebugMode() {
     debugMode = !debugMode;
     localStorage.setItem('ot:debugMode', String(debugMode));
+  }
+
+  // ─── Merge / Discard handlers ─────────────────────────────────────
+
+  function switchIdentity(keyBase64: string): void {
+    const newIdentity = importSecretKey(keyBase64);
+    cache.saveIdentity(keyBase64);
+    identity = newIdentity;
+    syncEngine = new SyncEngine(api, cache, newIdentity);
+    seqMap = new Map();
+  }
+
+  function handleMerge(): void {
+    if (!pendingKeyImport) return;
+    // Switch to the new identity, keeping all local events
+    switchIdentity(pendingKeyImport);
+    // Mark every local event as pending so they get pushed under the new key
+    markAllPending();
+    pendingKeyImport = null;
+    showMergePrompt = false;
+    refresh();
+    // Push merged events to the new key's server log, then pull
+    syncAll();
+  }
+
+  function handleDiscard(): void {
+    if (!pendingKeyImport) return;
+    // Wipe local events and switch to the new identity
+    clearLocalData();
+    switchIdentity(pendingKeyImport);
+    pendingKeyImport = null;
+    showMergePrompt = false;
+    refresh();
+    // Pull events from the new key's server
+    pullEvents();
   }
 
   // ─── Sync: push a single event to the server ──────────────────────
@@ -193,11 +261,21 @@
     }
   }
 
-  // Pull on initial load
+  // Pull on initial load (skip if waiting for merge decision)
   $effect(() => {
-    pullEvents();
+    if (!showMergePrompt) {
+      pullEvents();
+    }
   });
 </script>
+
+{#if showMergePrompt}
+  <MergePrompt
+    sessionCount={sessions.length}
+    onMerge={handleMerge}
+    onDiscard={handleDiscard}
+  />
+{/if}
 
 <TreeBackground />
 <main>

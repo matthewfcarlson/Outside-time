@@ -202,6 +202,23 @@ export function clearPending(): void {
   savePendingIds([]);
 }
 
+/** Mark every local event as pending upload (used after identity switch for merge). */
+export function markAllPending(): void {
+  const order = loadEventOrder();
+  savePendingIds([...order]);
+}
+
+/** Remove all local event data (events, order, pending, active timer). */
+export function clearLocalData(): void {
+  const order = loadEventOrder();
+  for (const id of order) {
+    localStorage.removeItem(`${LOCAL_EVENT_PREFIX}${id}`);
+  }
+  saveEventOrder([]);
+  savePendingIds([]);
+  localStorage.removeItem(ACTIVE_TIMER_KEY);
+}
+
 export function loadActiveTimer(): TimerStartEvent | null {
   const raw = localStorage.getItem(ACTIVE_TIMER_KEY);
   if (!raw) return null;
