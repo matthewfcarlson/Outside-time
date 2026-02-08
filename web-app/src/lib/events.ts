@@ -42,6 +42,30 @@ export interface ManualEntryEvent {
   };
 }
 
+/** User sets a goal for outdoor time in a given period */
+export interface GoalSetEvent {
+  type: 'goal_set';
+  id: string;
+  ts: number;
+  data: {
+    /** Target outdoor time in minutes */
+    target_minutes: number;
+    /** Time period this goal applies to */
+    period: 'day' | 'week' | 'month' | 'year';
+  };
+}
+
+/** User deletes a previously set goal */
+export interface GoalDeleteEvent {
+  type: 'goal_delete';
+  id: string;
+  ts: number;
+  data: {
+    /** ID of the goal_set event to delete */
+    goal_event_id: string;
+  };
+}
+
 /** Amends a prior event — references the original event ID */
 export interface CorrectionEvent {
   type: 'correction';
@@ -66,7 +90,9 @@ export type OutsideEvent =
   | TimerStartEvent
   | TimerStopEvent
   | ManualEntryEvent
-  | CorrectionEvent;
+  | CorrectionEvent
+  | GoalSetEvent
+  | GoalDeleteEvent;
 
 // ─── Event Constructors ─────────────────────────────────────────────────
 
@@ -139,6 +165,32 @@ export function createCorrection(
       corrects_event_id: correctsEventId,
       action,
       replacement,
+    },
+  };
+}
+
+export function createGoalSet(
+  targetMinutes: number,
+  period: 'day' | 'week' | 'month' | 'year'
+): GoalSetEvent {
+  return {
+    type: 'goal_set',
+    id: generateId(),
+    ts: nowSeconds(),
+    data: {
+      target_minutes: targetMinutes,
+      period,
+    },
+  };
+}
+
+export function createGoalDelete(goalEventId: string): GoalDeleteEvent {
+  return {
+    type: 'goal_delete',
+    id: generateId(),
+    ts: nowSeconds(),
+    data: {
+      goal_event_id: goalEventId,
     },
   };
 }

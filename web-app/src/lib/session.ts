@@ -11,6 +11,7 @@
 import type {
   OutsideEvent,
   TimerStartEvent,
+  GoalSetEvent,
 } from './events';
 
 // ─── Session types ─────────────────────────────────────────────────────
@@ -313,6 +314,92 @@ export function findActiveTimerStart(events: OutsideEvent[]): TimerStartEvent | 
   }
 
   return latest;
+}
+
+// ─── Goal reconstruction ──────────────────────────────────────────────
+
+export interface Goal {
+  /** ID of the goal_set event */
+  id: string;
+  /** Target outdoor time in minutes */
+  targetMinutes: number;
+  /** Time period this goal applies to */
+  period: 'day' | 'week' | 'month' | 'year';
+  /** When the goal was created (unix seconds) */
+  createdAt: number;
+}
+
+/**
+ * Process an event log into a list of active goals.
+ * Applies goal_delete events to remove previously set goals.
+ * Returns goals sorted by creation time (newest first).
+ */
+export function reconstructGoals(events: OutsideEvent[]): Goal[] {
+  const goals = new Map<string, Goal>();
+  const deletedIds = new Set<string>();
+
+  for (const event of events) {
+    if (event.type === 'goal_set') {
+      goals.set(event.id, {
+        id: event.id,
+        targetMinutes: event.data.target_minutes,
+        period: event.data.period,
+        createdAt: event.ts,
+      });
+    } else if (event.type === 'goal_delete') {
+      deletedIds.add(event.data.goal_event_id);
+      goals.delete(event.data.goal_event_id);
+    }
+  }
+
+  return Array.from(goals.values())
+    .filter((g) => !deletedIds.has(g.id))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Compute progress towards a goal based on sessions in the relevant time period. */
+export function computeGoalProgress(
+  goal: Goal,
+  sessions: Session[]
+): { currentMinutes: number; percentage: number } {
+  const now = new Date();
+  let periodStart: number;
+  let periodEnd: number;
+
+  switch (goal.period) {
+    case 'day': {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+      periodEnd = periodStart + 86400;
+      break;
+    }
+    case 'week': {
+      const dayOfWeek = now.getDay();
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek).getTime() / 1000;
+      periodEnd = periodStart + 7 * 86400;
+      break;
+    }
+    case 'month': {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000;
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime() / 1000;
+      break;
+    }
+    case 'year': {
+      periodStart = new Date(now.getFullYear(), 0, 1).getTime() / 1000;
+      periodEnd = new Date(now.getFullYear() + 1, 0, 1).getTime() / 1000;
+      break;
+    }
+  }
+
+  const periodSessions = sessions.filter(
+    (s) => s.startedAt >= periodStart && s.startedAt < periodEnd
+  );
+
+  const currentMinutes = periodSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+  const percentage = goal.targetMinutes > 0
+    ? Math.min(100, Math.round((currentMinutes / goal.targetMinutes) * 100))
+    : 0;
+
+  return { currentMinutes, percentage };
 }
 
 // ─── Display helpers ───────────────────────────────────────────────────
