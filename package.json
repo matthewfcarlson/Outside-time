@@ -1,0 +1,17 @@
+{
+  "name": "outside-time",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "web-app",
+    "cloudflare-workers"
+  ],
+  "scripts": {
+    "build:core": "npm run build -w @outside-time/core",
+    "build:web": "npm run build -w outside-time-web",
+    "build:ios-bridge": "npm run build:iife -w @outside-time/core && cp packages/core/dist/core.bundle.js ios-app/OutsideTime/Resources/core.bundle.js",
+    "test": "npm run test --workspaces --if-present",
+    "test:core": "npm run test -w @outside-time/core",
+    "test:web": "npm run test -w outside-time-web"
+  }
+}
