@@ -9,7 +9,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
 
   reporter: process.env.CI
-    ? [["html", { open: "never" }], ["github"]]
+    ? [["html", { open: "never" }], ["github"], ["json", { outputFile: "test-results/results.json" }]]
     : [["html"]],
 
   use: {
@@ -22,6 +22,18 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "iphone-16",
+      use: {
+        viewport: { width: 393, height: 852 },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+        defaultBrowserType: "chromium",
+        userAgent:
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      },
     },
   ],
 

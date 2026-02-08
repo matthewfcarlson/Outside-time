@@ -74,11 +74,7 @@ test.describe("Goals", () => {
       page.locator("text=No goals set. Add one to track your progress!")
     ).toBeVisible();
 
-    // Open the add goal form
-    await page.click("button.add-btn", {
-      // There are multiple add-btn (Goals + SessionLog), pick the first one in Goals
-    });
-    // Goals section has the first "Add Goal" button — let's be more specific
+    // Goals section has the "Add Goal" button
     const goalsSection = page.locator(".goals");
     await goalsSection.locator("button.add-btn").click();
     await takeStepScreenshot(page, testInfo, "02-goal-form-open");
@@ -148,7 +144,7 @@ test.describe("Manual session entry", () => {
 });
 
 test.describe("Settings", () => {
-  test("open settings panel and view identity", async ({ page }, testInfo) => {
+  test("open settings and view identity", async ({ page }, testInfo) => {
     await page.goto("/");
     await takeStepScreenshot(page, testInfo, "01-before-settings");
 
@@ -156,45 +152,156 @@ test.describe("Settings", () => {
     await page.click('button:has-text("Settings")');
     await takeStepScreenshot(page, testInfo, "02-settings-open");
 
-    // Identity section should be visible
+    // Identity section should be visible with public key
     await expect(page.locator(".identity-section")).toBeVisible();
+    await expect(page.locator("text=Your Identity")).toBeVisible();
     await expect(page.locator(".pubkey")).toBeVisible();
+    // Public key should be in short format (8 chars...8 chars)
+    await expect(page.locator(".pubkey")).toHaveText(/^[a-f0-9]{8}\.\.\.[a-f0-9]{8}$/);
 
-    // Sync status should be visible
-    await expect(page.locator(".sync-dot")).toBeVisible();
+    // Sync status should show "Not synced" or similar (no backend)
+    await expect(page.locator(".sync-text")).toBeVisible();
+    await expect(page.locator("button.sync-btn")).toBeVisible();
+    await expect(page.locator("button.sync-btn")).toHaveText("Sync Now");
 
-    // Debug mode toggle should be visible
+    // Debug mode toggle
     await expect(page.locator("text=Debug mode")).toBeVisible();
 
     // Close settings
     await page.click('button:has-text("Close")');
     await takeStepScreenshot(page, testInfo, "03-settings-closed");
-
-    // Settings panel should be hidden
     await expect(page.locator(".settings-panel")).not.toBeVisible();
+  });
+
+  test("generate QR code for device sync", async ({ page }, testInfo) => {
+    await page.goto("/");
+    await page.click('button:has-text("Settings")');
+    await takeStepScreenshot(page, testInfo, "01-settings-panel");
+
+    // Click "Generate QR Code for Device Sync"
+    await page.click('button:has-text("Generate QR Code for Device Sync")');
+    await takeStepScreenshot(page, testInfo, "02-security-warning");
+
+    // Security warning should appear
+    await expect(page.locator(".warning-box")).toBeVisible();
+    await expect(page.locator("text=Security Warning")).toBeVisible();
+    await expect(page.locator("text=private key")).toBeVisible();
+    await expect(
+      page.locator("text=Never share it with anyone else.")
+    ).toBeVisible();
+
+    // Confirm to see the QR code
+    await page.click('button:has-text("I understand, show QR code")');
+    await takeStepScreenshot(page, testInfo, "03-qr-code-visible");
+
+    // QR code image should be visible
+    await expect(page.locator("img.qr-image")).toBeVisible();
+    await expect(
+      page.locator("text=Scan on another device to sync your identity.")
+    ).toBeVisible();
+    await expect(
+      page.locator('button:has-text("Copy URL to Clipboard")')
+    ).toBeVisible();
+    await expect(
+      page.locator('button:has-text("Hide QR Code")')
+    ).toBeVisible();
+
+    // Hide the QR code
+    await page.click('button:has-text("Hide QR Code")');
+    await takeStepScreenshot(page, testInfo, "04-qr-hidden");
+
+    // QR should be gone, back to the generate button
+    await expect(page.locator("img.qr-image")).not.toBeVisible();
+    await expect(
+      page.locator('button:has-text("Generate QR Code for Device Sync")')
+    ).toBeVisible();
+  });
+
+  test("toggle debug mode", async ({ page }, testInfo) => {
+    await page.goto("/");
+    await page.click('button:has-text("Settings")');
+
+    // Debug checkbox should be unchecked
+    const checkbox = page.locator('.debug-label input[type="checkbox"]');
+    await expect(checkbox).not.toBeChecked();
+    await takeStepScreenshot(page, testInfo, "01-debug-off");
+
+    // Enable debug mode
+    await checkbox.check();
+    await expect(checkbox).toBeChecked();
+    await takeStepScreenshot(page, testInfo, "02-debug-on");
+
+    // Close and re-open settings — should persist
+    await page.click('button:has-text("Close")');
+    await page.click('button:has-text("Settings")');
+    await expect(
+      page.locator('.debug-label input[type="checkbox"]')
+    ).toBeChecked();
+    await takeStepScreenshot(page, testInfo, "03-debug-persisted");
   });
 });
 
 test.describe("About page", () => {
-  test("navigate to and from the about page", async ({ page }, testInfo) => {
+  test("navigate to about and verify content", async ({ page }, testInfo) => {
     await page.goto("/");
     await takeStepScreenshot(page, testInfo, "01-home-page");
 
     // Click About
     await page.click('button:has-text("About")');
-    await takeStepScreenshot(page, testInfo, "02-about-page");
+    await takeStepScreenshot(page, testInfo, "02-about-page-top");
 
-    // Should show about content
+    // Verify all about cards are present
     await expect(page.locator("text=What is this?")).toBeVisible();
+    await expect(
+      page.locator(
+        "text=Outside Time helps you track how much time you spend outdoors."
+      )
+    ).toBeVisible();
+
     await expect(page.locator("text=Privacy first")).toBeVisible();
+    await expect(
+      page.locator("text=Your data is encrypted on your device")
+    ).toBeVisible();
+
     await expect(page.locator("text=How it works")).toBeVisible();
+    await expect(page.locator("text=Go Outside")).toBeVisible();
+    await expect(page.locator("text=I'm Back Inside")).toBeVisible();
+
     await expect(page.locator("text=Cross-device sync")).toBeVisible();
+    await expect(
+      page.locator("text=scan the QR code on another device")
+    ).toBeVisible();
 
-    // Go back
+    await takeStepScreenshot(page, testInfo, "03-about-all-cards");
+
+    // Back button returns to main page
     await page.click("button.back-btn");
-    await takeStepScreenshot(page, testInfo, "03-back-home");
+    await takeStepScreenshot(page, testInfo, "04-back-to-home");
 
-    // Should be back on main page
+    // Verify we're back — timer button visible, about cards gone
     await expect(page.locator("button.timer-btn.start")).toBeVisible();
+    await expect(page.locator(".about-content")).not.toBeVisible();
+  });
+
+  test("about page hides main app controls", async ({ page }, testInfo) => {
+    await page.goto("/");
+
+    // Main controls should be visible
+    await expect(page.locator("button.timer-btn.start")).toBeVisible();
+    await expect(page.locator(".summary")).toBeVisible();
+
+    // Navigate to About
+    await page.click('button:has-text("About")');
+    await takeStepScreenshot(page, testInfo, "01-about-no-controls");
+
+    // Main controls should be hidden
+    await expect(page.locator("button.timer-btn")).not.toBeVisible();
+    await expect(page.locator(".summary")).not.toBeVisible();
+    await expect(page.locator(".session-log")).not.toBeVisible();
+    await expect(page.locator(".goals")).not.toBeVisible();
+
+    // About back button should be visible
+    await expect(page.locator("button.back-btn")).toBeVisible();
+    await expect(page.locator("button.back-btn")).toHaveText(/Back/);
   });
 });
