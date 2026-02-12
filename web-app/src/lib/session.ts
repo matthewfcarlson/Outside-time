@@ -217,6 +217,11 @@ export function clearLocalData(): void {
   localStorage.removeItem(ACTIVE_TIMER_KEY);
 }
 
+/** Update an already-stored event in localStorage (e.g. to change its timestamp). */
+export function updateStoredEvent(event: OutsideEvent): void {
+  localStorage.setItem(`${LOCAL_EVENT_PREFIX}${event.id}`, JSON.stringify(event));
+}
+
 export function loadActiveTimer(): TimerStartEvent | null {
   const raw = localStorage.getItem(ACTIVE_TIMER_KEY);
   if (!raw) return null;
