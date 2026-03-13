@@ -180,6 +180,81 @@ describe('SyncEngine', () => {
     });
   });
 
+  describe('pushUnsynced', () => {
+    it('pushes nothing when there are no local events', async () => {
+      const appendSpy = vi.spyOn(api, 'append');
+      const pushed = await engine.pushUnsynced([]);
+      expect(pushed).toBe(0);
+      expect(appendSpy).not.toHaveBeenCalled();
+    });
+
+    it('pushes nothing when all local events are already on the server', async () => {
+      const event1 = makeTimerStart('e1', 1000);
+      const event2 = makeTimerStart('e2', 2000);
+
+      // Pre-populate the cache so both events appear as "already synced"
+      cache.appendEvents(identity.publicKeyHex, [
+        { seq: 1, ciphertext: encryptTestEvent(event1, identity), created_at: 1000 },
+        { seq: 2, ciphertext: encryptTestEvent(event2, identity), created_at: 2000 },
+      ]);
+
+      const appendSpy = vi.spyOn(api, 'append');
+      const pushed = await engine.pushUnsynced([event1, event2]);
+      expect(pushed).toBe(0);
+      expect(appendSpy).not.toHaveBeenCalled();
+    });
+
+    it('pushes only events not yet on the server', async () => {
+      const event1 = makeTimerStart('e1', 1000);
+      const event2 = makeTimerStart('e2', 2000);
+      const event3 = makeTimerStart('e3', 3000);
+
+      // e1 and e2 are already on the server cache
+      cache.appendEvents(identity.publicKeyHex, [
+        { seq: 1, ciphertext: encryptTestEvent(event1, identity), created_at: 1000 },
+        { seq: 2, ciphertext: encryptTestEvent(event2, identity), created_at: 2000 },
+      ]);
+
+      // e3 is only local
+      vi.spyOn(api, 'append').mockResolvedValue({ seq: 3, created_at: 3000 });
+
+      const pushed = await engine.pushUnsynced([event1, event2, event3]);
+      expect(pushed).toBe(1);
+      expect(api.append).toHaveBeenCalledTimes(1);
+    });
+
+    it('pushes all events when cache is empty', async () => {
+      const event1 = makeTimerStart('e1', 1000);
+      const event2 = makeTimerStart('e2', 2000);
+
+      vi.spyOn(api, 'append')
+        .mockResolvedValueOnce({ seq: 1, created_at: 1000 })
+        .mockResolvedValueOnce({ seq: 2, created_at: 2000 });
+
+      const pushed = await engine.pushUnsynced([event1, event2]);
+      expect(pushed).toBe(2);
+      expect(api.append).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('decryptCachedEvents error handling', () => {
+    it('skips events that fail decryption (wrong identity)', async () => {
+      const otherIdentity = generateIdentity();
+      const event1 = makeTimerStart('e1', 1000);
+      const event2 = makeTimerStart('e2', 2000);
+
+      // event1 encrypted with correct identity, event2 with a different identity
+      cache.appendEvents(identity.publicKeyHex, [
+        { seq: 1, ciphertext: encryptTestEvent(event1, identity), created_at: 1000 },
+        { seq: 2, ciphertext: encryptTestEvent(event2, otherIdentity), created_at: 2000 },
+      ]);
+
+      const decrypted = engine.decryptCachedEvents();
+      expect(decrypted).toHaveLength(1);
+      expect(decrypted[0].event.id).toBe('e1');
+    });
+  });
+
   describe('getSyncStatus', () => {
     it('reports correct status', () => {
       const status = engine.getSyncStatus();
