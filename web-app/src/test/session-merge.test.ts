@@ -123,6 +123,80 @@ describe('clearLocalData', () => {
   });
 });
 
+describe('saveEvents', () => {
+  it('overwrites all existing events with a new list', async () => {
+    const { appendEvent, saveEvents, loadEvents } = await import('../lib/session');
+
+    appendEvent(makeTimerStart('old1', 1000));
+    appendEvent(makeTimerStart('old2', 2000));
+
+    const newEvents = [makeManualEntry('new1', 3000), makeManualEntry('new2', 4000)];
+    saveEvents(newEvents);
+
+    const loaded = loadEvents();
+    expect(loaded).toHaveLength(2);
+    expect(loaded.map((e) => e.id)).toEqual(['new1', 'new2']);
+  });
+
+  it('clears all events when called with empty array', async () => {
+    const { appendEvent, saveEvents, loadEvents } = await import('../lib/session');
+
+    appendEvent(makeTimerStart('e1', 1000));
+    saveEvents([]);
+    expect(loadEvents()).toEqual([]);
+  });
+});
+
+describe('appendPulledEvents', () => {
+  it('adds server events without marking them pending', async () => {
+    const { appendPulledEvents, loadEvents, loadPendingEvents } = await import('../lib/session');
+
+    const serverEvents = [makeTimerStart('s1', 1000), makeManualEntry('s2', 2000)];
+    appendPulledEvents(serverEvents);
+
+    expect(loadEvents()).toHaveLength(2);
+    // Server events must NOT be in the pending queue
+    expect(loadPendingEvents()).toEqual([]);
+  });
+
+  it('does nothing when called with empty array', async () => {
+    const { appendPulledEvents, loadEvents } = await import('../lib/session');
+    appendPulledEvents([]);
+    expect(loadEvents()).toEqual([]);
+  });
+
+  it('can coexist with locally appended events in the order list', async () => {
+    const { appendEvent, appendPulledEvents, loadEvents, loadPendingEvents } =
+      await import('../lib/session');
+
+    appendEvent(makeTimerStart('local1', 1000));
+    appendPulledEvents([makeManualEntry('server1', 2000)]);
+
+    const events = loadEvents();
+    expect(events.map((e) => e.id)).toEqual(['local1', 'server1']);
+
+    // Only the locally created event should be pending
+    const pending = loadPendingEvents();
+    expect(pending.map((e) => e.id)).toEqual(['local1']);
+  });
+});
+
+describe('updateStoredEvent', () => {
+  it('overwrites the stored data for an existing event', async () => {
+    const { appendEvent, updateStoredEvent, loadEvents } = await import('../lib/session');
+
+    const original = makeTimerStart('e1', 1000);
+    appendEvent(original);
+
+    const updated = { ...original, ts: 9999 };
+    updateStoredEvent(updated);
+
+    const events = loadEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].ts).toBe(9999);
+  });
+});
+
 describe('merge flow integration', () => {
   it('markAllPending after appendEvent makes all events pushable', async () => {
     const { appendEvent, markEventSynced, clearPending, loadPendingEvents, markAllPending } =
